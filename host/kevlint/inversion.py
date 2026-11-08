@@ -61,6 +61,14 @@ class Result:
     violations: list
     evaluated: int
     not_evaluated: Counter
+    evaluated_max_priority: int = None
+    not_evaluated_max_priority: int = None
+
+    @property
+    def unevaluated_outranks_evaluated(self):
+        """True if a block the rule could not check outranks every waiter it did."""
+        skipped, checked = self.not_evaluated_max_priority, self.evaluated_max_priority
+        return skipped is not None and (checked is None or skipped > checked)
 
 
 @dataclass
@@ -236,24 +244,38 @@ def _evaluate(block, runs, history, last_cycles):
     )
 
 
+def _higher(current, priority):
+    if priority is None:
+        return current
+    return priority if current is None else max(current, priority)
+
+
 def check(trace):
     blocks, runs, history = _scan(trace)
     last_cycles = trace.events[-1].cycles
     violations = []
     evaluated = 0
     not_evaluated = Counter()
+    evaluated_max = None
+    not_evaluated_max = None
 
     for block in blocks:
+        reason = None
         if block.wait_call is None:
-            not_evaluated["no matching wait call in the trace"] += 1
+            reason = "no matching wait call in the trace"
         elif block.end is None:
-            not_evaluated["block still open when the trace ended"] += 1
+            reason = "block still open when the trace ended"
         elif block.release is None:
-            not_evaluated["no visible release of the sync object"] += 1
-        else:
-            evaluated += 1
-            violation = _evaluate(block, runs, history, last_cycles)
-            if violation is not None:
-                violations.append(violation)
+            reason = "no visible release of the sync object"
 
-    return Result(violations, evaluated, not_evaluated)
+        if reason is not None:
+            not_evaluated[reason] += 1
+            not_evaluated_max = _higher(not_evaluated_max, block.start.priority)
+            continue
+        evaluated += 1
+        evaluated_max = _higher(evaluated_max, block.start.priority)
+        violation = _evaluate(block, runs, history, last_cycles)
+        if violation is not None:
+            violations.append(violation)
+
+    return Result(violations, evaluated, not_evaluated, evaluated_max, not_evaluated_max)

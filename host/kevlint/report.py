@@ -91,6 +91,15 @@ code, .mono { font-family: var(--mono); font-size: .92em; }
 .reasons li { display: flex; gap: 10px; padding: 3px 0; }
 .reasons b { min-width: 2.5em; text-align: right; color: var(--ink);
   font-variant-numeric: tabular-nums; }
+.priorities { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--grid);
+  color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.priorities b { color: var(--ink); }
+.warn { display: flex; gap: 10px; align-items: flex-start; margin-top: 12px;
+  padding: 10px 12px; background: var(--code); border-left: 4px solid var(--warning);
+  border-radius: 6px; }
+.warn .mark-warn { flex: none; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--warning); color: #0b0b0b; font: 700 13px/20px var(--sans);
+  text-align: center; }
 .plain { color: var(--ink-2); }
 .plain code { color: var(--ink); }
 .note { color: var(--ink-2); }
@@ -490,6 +499,28 @@ def pattern_card(pattern, trace):
 </section>"""
 
 
+def priority_text(priority):
+    return "none" if priority is None else priority
+
+
+def coverage_warning(result):
+    if not result.unevaluated_outranks_evaluated:
+        return ""
+    unchecked = result.not_evaluated_max_priority
+    checked = result.evaluated_max_priority
+    compared = (
+        "and no waiter could be evaluated"
+        if checked is None
+        else f"above the highest evaluated waiter ({checked})"
+    )
+    return (
+        '<div class="warn" role="alert"><span class="mark-warn" aria-hidden="true">!</span>'
+        "<div><strong>Warning: higher-priority blocks were not evaluated.</strong> "
+        f"A not-evaluated block has priority {unchecked}, {compared}. "
+        "This result does not cover those threads.</div></div>"
+    )
+
+
 def coverage_card(result):
     skipped = sum(result.not_evaluated.values())
     total = result.evaluated + skipped
@@ -498,6 +529,8 @@ def coverage_card(result):
         for reason, count in sorted(result.not_evaluated.items())
     )
     reasons_html = f'<ul class="reasons">{reasons}</ul>' if reasons else ""
+    checked = result.evaluated_max_priority
+    unchecked = result.not_evaluated_max_priority
     return f"""
 <section class="card">
   <div class="eyebrow">Coverage</div>
@@ -510,6 +543,9 @@ def coverage_card(result):
     <i class="done" style="flex:{result.evaluated} 1 0"></i><i style="flex:{skipped} 1 0"></i>
   </div>
   {reasons_html}
+  <div class="priorities">Highest waiter priority:
+  <b>{priority_text(checked)}</b> evaluated, <b>{priority_text(unchecked)}</b> not evaluated</div>
+  {coverage_warning(result)}
 </section>"""
 
 

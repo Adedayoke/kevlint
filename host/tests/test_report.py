@@ -159,5 +159,32 @@ class PlainSummaryTest(unittest.TestCase):
         self.assertIn(self.SENTENCE.format(amount="249 ms"), page)
 
 
+class PriorityCoverageTest(unittest.TestCase):
+    WARNING = "Warning: higher-priority blocks were not evaluated."
+
+    def test_equal_priorities_do_not_warn(self):
+        page, _, result = render("demo_inversion")
+        self.assertEqual(result.evaluated_max_priority, 50)
+        self.assertEqual(result.not_evaluated_max_priority, 50)
+        self.assertIn("<b>50</b> evaluated, <b>50</b> not evaluated", page)
+        self.assertNotIn(self.WARNING, page)
+
+    def test_lower_unevaluated_priority_does_not_warn(self):
+        page, _, _ = render("demo_fixed")
+        self.assertIn("<b>50</b> evaluated, <b>21</b> not evaluated", page)
+        self.assertNotIn(self.WARNING, page)
+
+    def test_higher_unevaluated_priority_warns(self):
+        def remove_semaphore_waits(trace):
+            trace.events = [e for e in trace.events if e.name != "SYNC_SEM_WAIT/85"]
+
+        page, _, result = render("demo_inversion", remove_semaphore_waits)
+        self.assertTrue(result.unevaluated_outranks_evaluated)
+        self.assertEqual(result.not_evaluated_max_priority, 50)
+        self.assertIn(self.WARNING, page)
+        self.assertIn("A not-evaluated block has priority 50", page)
+        self.assertIn('class="warn"', page)
+
+
 if __name__ == "__main__":
     unittest.main()
