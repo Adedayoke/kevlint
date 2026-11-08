@@ -75,6 +75,11 @@ class RuleResult:
         return f"{self.evaluated} evaluated, {skipped} not evaluated"
 
 
+def line_text(lines):
+    """Evidence lines as text, such as 'wait call 12, block start 15'."""
+    return ", ".join(f"{label} {number}" for label, number in lines.items())
+
+
 def overall_status(rules):
     """The worst status across rules: ERROR, then FAIL, then NOT EVALUATED."""
     statuses = {rule.status for rule in rules}

@@ -7,9 +7,11 @@ script only adds richer tooltips over the SVG <title> fallback.
 import html
 import math
 
+from .config import INVERSION, MAX_BLOCKED
 from .explain import CHECK_NOTE, WHERE_LABEL, line_list, pattern_key
 from .inversion import HOLDER_NOTE, TYPICAL_FIXES, boost_text
 from .patterns import group_patterns
+from .rules import ERROR, FAIL, NOT_EVALUATED, PASS, line_text, overall_status
 from .timeline import BLOCKED, READY, RUNNING, thread_segments
 
 WIDTH = 1000
@@ -42,6 +44,25 @@ EXPLANATION_CSS = """
 .ai-where { margin: 8px 0 0; padding-top: 8px; border-top: 1px solid var(--border); }
 .ai-where strong { display: block; }
 .ai-lines { font-family: var(--mono); font-size: .9em; color: var(--muted); white-space: nowrap; }
+"""
+
+# Only reports made with --config carry this, so other reports stay unchanged.
+RULES_CSS = """
+.banner.warn { --status: var(--warning); }
+.banner.warn .icon { color: #0b0b0b; }
+a.rule-link { color: inherit; font-family: var(--mono); }
+.pill { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px;
+  font-weight: 700; letter-spacing: .02em; white-space: nowrap; color: #fff; }
+.pill.pass { background: var(--good); }
+.pill.fail { background: var(--critical); }
+.pill.warn { background: var(--warning); color: #0b0b0b; }
+.rule-title { display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  font: 600 17px var(--mono); margin-top: 18px; padding-top: 14px;
+  border-top: 2px solid var(--axis); scroll-margin-top: 12px; }
+.rule-card { display: grid; gap: 12px; }
+.rule-card h3 { font-size: 13px; font-weight: 600; margin: 0; }
+.rules-off { color: var(--muted); font-size: 13px; margin-top: 10px; }
+.rule-card .warn { margin-top: 0; }
 """
 
 CSS = """
@@ -741,14 +762,238 @@ def footer_html(path, trace):
 </footer>"""
 
 
-def render_html(path, trace, result, explanations=None):
+STATUS_CLASS = {PASS: "pass", FAIL: "fail", ERROR: "fail", NOT_EVALUATED: "warn"}
+STATUS_ICON = {PASS: "✓", FAIL: "✕", ERROR: "✕", NOT_EVALUATED: "!"}
+VISIBILITY_NOTE = (
+    "A block already in progress when the trace started has no visible start, so it "
+    "cannot be measured."
+)
+
+
+def pill(status):
+    return f'<span class="pill {STATUS_CLASS[status]}">{esc(status)}</span>'
+
+
+def ms_cell(value):
+    return "none" if value is None else f"{value:.3f}"
+
+
+def rule_anchor(name):
+    return f"rule-{name}"
+
+
+def alert(title, text):
+    return (
+        '<div class="warn" role="alert"><span class="mark-warn" aria-hidden="true">!</span>'
+        f"<div><strong>{esc(title)}</strong> {esc(text)}</div></div>"
+    )
+
+
+def rules_overview(rules, config):
+    rows = "".join(
+        f'<tr><td><a class="rule-link" href="#{esc(rule_anchor(rule.name))}">{esc(rule.name)}</a></td>'
+        f"<td>{pill(rule.status)}</td><td>{len(rule.findings)}</td>"
+        f"<td>{ms_cell(rule.worst_ms)}</td><td>{esc(rule.coverage)}</td></tr>"
+        for rule in rules
+    )
+    off = (
+        f'<p class="rules-off">Not enabled: {esc(", ".join(config.disabled))}</p>'
+        if config.disabled
+        else ""
+    )
+    return f"""
+<section class="card">
+  <div class="eyebrow">Results by rule</div>
+  <div class="scroll"><table><thead><tr><th>Rule</th><th>Result</th><th>Findings</th>
+  <th>Worst block (ms)</th><th>Coverage</th></tr></thead><tbody>{rows}</tbody></table></div>
+  {off}
+</section>"""
+
+
+def rule_coverage(rule):
+    reasons = "".join(
+        f"<li><b>{count}</b><span>{esc(reason)}</span></li>"
+        for reason, count in sorted(rule.not_evaluated.items())
+    )
+    reasons_html = f'<ul class="reasons">{reasons}</ul>' if reasons else ""
+    return f"<div><h3>Coverage: {esc(rule.coverage)}</h3>{reasons_html}</div>"
+
+
+def rule_alerts(rule):
+    return "".join(alert("Error:", text) for text in rule.errors) + "".join(
+        alert("Warning:", text) for text in rule.warnings
+    )
+
+
+def rule_heading(rule):
+    return (
+        f'<h2 class="rule-title" id="{esc(rule_anchor(rule.name))}">{esc(rule.name)} '
+        f"{pill(rule.status)}</h2>"
+    )
+
+
+def finding_duration(finding, trace):
+    millis = finding.duration_cycles * 1000 / trace.cycles_per_sec
+    if finding.end_cycles is None:
+        return f"at least {millis:.3f} (still open at trace end)"
+    return f"{millis:.3f}"
+
+
+def holder_cell(finding, trace):
+    return "not visible" if finding.holder is None else thread_html(trace, finding.holder)
+
+
+def budgets_table(rule):
+    rows = "".join(
+        f'<tr><td class="mono">{esc(row.budget.thread)}</td><td>{row.budget.max_ms:g}</td>'
+        f'<td class="mono">{esc(", ".join(row.budget.states))}</td>'
+        f"<td>{pill(row.status)}</td><td>{row.evaluated}</td><td>{row.breaches}</td>"
+        f"<td>{ms_cell(row.worst_ms)}</td></tr>"
+        for row in rule.budgets
+    )
+    return (
+        '<div class="scroll"><table><thead><tr><th>Thread</th><th>Budget (ms)</th>'
+        "<th>States counted</th><th>Result</th><th>Evaluated</th><th>Breaches</th>"
+        f"<th>Worst (ms)</th></tr></thead><tbody>{rows}</tbody></table></div>"
+    )
+
+
+def breaches_table(rule, trace):
+    worst = max(rule.findings, key=lambda f: f.duration_cycles)
+    rows = []
+    for number, finding in enumerate(rule.findings, 1):
+        millis = finding.duration_cycles * 1000 / trace.cycles_per_sec
+        cls = ' class="worst"' if finding is worst else ""
+        rows.append(
+            f"<tr{cls}><td>{number}</td><td>{thread_html(trace, finding.thread)}</td>"
+            f"<td>{priority_text(finding.priority)}</td>"
+            f'<td class="mono">{esc(finding.state)}</td>'
+            f'<td class="mono">{esc(finding.sync_p or "not visible")}</td>'
+            f"<td>{finding_duration(finding, trace)}</td><td>{finding.budget_ms:g}</td>"
+            f"<td>{millis - finding.budget_ms:.3f}</td>"
+            f"<td>{trace.seconds(finding.start_cycles):.6f}</td>"
+            f"<td>{holder_cell(finding, trace)}</td>"
+            f"<td>{esc(line_text(finding.lines))}</td></tr>"
+        )
+    return (
+        '<div class="scroll"><table><thead><tr><th>#</th><th>Thread</th><th>Priority</th>'
+        "<th>State</th><th>sync_p</th><th>Blocked (ms)</th><th>Budget (ms)</th><th>Over by (ms)</th>"
+        "<th>Start (s)</th><th>Holder (inferred)</th><th>Evidence lines</th></tr></thead>"
+        f'<tbody>{"".join(rows)}</tbody></table></div>'
+    )
+
+
+def semaphore_table(rule, trace):
+    worst = max(rule.findings, key=lambda f: f.duration_cycles)
+    rows = []
+    for number, finding in enumerate(rule.findings, 1):
+        cls = ' class="worst"' if finding is worst else ""
+        rows.append(
+            f"<tr{cls}><td>{number}</td><td>{thread_html(trace, finding.thread)}</td>"
+            f"<td>{priority_text(finding.priority)}</td>"
+            f'<td class="mono">{esc(finding.sync_p or "not visible")}</td>'
+            f"<td>{finding_duration(finding, trace)}</td>"
+            f"<td>{trace.seconds(finding.start_cycles):.6f}</td>"
+            f"<td>{holder_cell(finding, trace)}</td>"
+            f"<td>{esc(line_text(finding.lines))}</td></tr>"
+        )
+    return (
+        '<div class="scroll"><table><thead><tr><th>#</th><th>Thread</th><th>Priority</th>'
+        "<th>sync_p</th><th>Blocked (ms)</th><th>Start (s)</th><th>Holder (inferred)</th>"
+        f'<th>Evidence lines</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
+    )
+
+
+def max_blocked_section(rule, trace):
+    breaches = (
+        f"<div><h3>Breaches ({len(rule.findings)})</h3>{breaches_table(rule, trace)}</div>"
+        if rule.findings
+        else '<p class="empty">No block exceeded its budget.</p>'
+    )
+    return f"""
+{rule_heading(rule)}
+<section class="card rule-card">
+  <p class="plain">Each named thread must not stay in the listed states longer than its
+  budget. Time in THREADY is not counted. {esc(VISIBILITY_NOTE)}</p>
+  {rule_alerts(rule)}
+  {budgets_table(rule)}
+  {breaches}
+  {rule_coverage(rule)}
+</section>"""
+
+
+def semaphore_section(rule, trace, minimum):
+    findings = (
+        f"<div><h3>Findings ({len(rule.findings)})</h3>{semaphore_table(rule, trace)}</div>"
+        f'<p class="fix"><strong>Typical fix</strong>{esc(TYPICAL_FIXES["THSEM"])}</p>'
+        if rule.findings
+        else f'<p class="empty">No thread at priority {minimum} or above blocked on a semaphore.</p>'
+    )
+    return f"""
+{rule_heading(rule)}
+<section class="card rule-card">
+  <p class="plain">Flags each entry to THSEM at priority {minimum} or above, because
+  semaphores have no priority inheritance. {esc(VISIBILITY_NOTE)}</p>
+  {rule_alerts(rule)}
+  {findings}
+  {rule_coverage(rule)}
+</section>"""
+
+
+def inversion_section(rule, trace, explanations):
+    result = rule.inversion
+    _, body = inversion_summary_and_body(result, trace, explanations)
+    return f"""
+{rule_heading(rule)}
+<div class="grid-2">{coverage_card(result)}{notes_card()}</div>
+{body}"""
+
+
+def rule_section(rule, trace, config, explanations):
+    if rule.name == INVERSION:
+        return inversion_section(rule, trace, explanations)
+    if rule.name == MAX_BLOCKED:
+        return max_blocked_section(rule, trace)
+    return semaphore_section(rule, trace, config.semaphore_min_priority)
+
+
+def rules_summary(rules):
+    failed = sum(rule.status in (FAIL, ERROR) for rule in rules)
+    skipped = sum(rule.status == NOT_EVALUATED for rule in rules)
+    findings = sum(len(rule.findings) for rule in rules)
+    if failed:
+        return f"{failed} of {plural(len(rules), 'rule')} failed, {plural(findings, 'finding')}"
+    if skipped:
+        return f"{skipped} of {plural(len(rules), 'rule')} not evaluated"
+    return "All rules passed in the blocks they evaluated"
+
+
+def render_rules_html(path, trace, rules, config, explanations):
+    verdict = overall_status(rules)
+    scope = (
+        f"<b>{plural(len(rules), 'rule')}</b> run<br>\n    <b>{len(config.disabled)}</b> not enabled"
+    )
+    body = "".join(rule_section(rule, trace, config, explanations) for rule in rules)
+    return html_page(
+        path,
+        trace,
+        verdict,
+        STATUS_CLASS[verdict],
+        STATUS_ICON[verdict],
+        "rules",
+        rules_summary(rules),
+        scope,
+        rules_overview(rules, config),
+        body,
+        CSS + (EXPLANATION_CSS if explanations else "") + RULES_CSS,
+    )
+
+
+def inversion_summary_and_body(result, trace, explanations):
+    """Return the banner summary and the cards for the inversion rule."""
     patterns = group_patterns(result.violations)
     total = len(result.violations)
-    skipped = sum(result.not_evaluated.values())
-    blocks = result.evaluated + skipped
-    failed = bool(total)
-
-    if failed:
+    if total:
         worst = patterns[0].worst.duration_cycles / trace.cycles_per_sec
         summary = (
             f"{plural(total, 'violation')} in {plural(len(patterns), 'pattern')}, "
@@ -773,9 +1018,36 @@ def render_html(path, trace, result, explanations=None):
             + resolved_card(worst_resolved, trace)
         )
 
-    verdict = "FAIL" if failed else "PASS"
-    status = "fail" if failed else "pass"
-    icon = "✕" if failed else "✓"
+    return summary, body
+
+
+def render_html(path, trace, result, explanations=None, rules=None, config=None):
+    if rules is not None:
+        return render_rules_html(path, trace, rules, config, explanations)
+    summary, body = inversion_summary_and_body(result, trace, explanations)
+    skipped = sum(result.not_evaluated.values())
+    blocks = result.evaluated + skipped
+    failed = bool(result.violations)
+    scope = (
+        f"<b>{result.evaluated} of {blocks}</b> blocks evaluated<br>\n"
+        f"    <b>{skipped}</b> not evaluated"
+    )
+    return html_page(
+        path,
+        trace,
+        "FAIL" if failed else "PASS",
+        "fail" if failed else "pass",
+        "✕" if failed else "✓",
+        "priority-inversion",
+        summary,
+        scope,
+        f'<div class="grid-2">{coverage_card(result)}{notes_card()}</div>',
+        body,
+        CSS + (EXPLANATION_CSS if explanations else ""),
+    )
+
+
+def html_page(path, trace, verdict, status, icon, brand, summary, scope, top, body, styles):
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -783,20 +1055,19 @@ def render_html(path, trace, result, explanations=None):
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="{CSP}">
 <title>kevlint {verdict}: {esc(path)}</title>
-<style>{CSS}{EXPLANATION_CSS if explanations else ""}</style>
+<style>{styles}</style>
 </head>
 <body>
 {PATTERN_DEFS}
 <main>
-  <div class="brand"><b>kevlint</b><span>priority-inversion</span>
+  <div class="brand"><b>kevlint</b><span>{esc(brand)}</span>
   <span class="path">{esc(path)}</span></div>
   <header class="banner {status}">
     <div class="icon" aria-hidden="true">{icon}</div>
     <div><div class="verdict">{verdict}</div><div class="summary">{esc(summary)}</div></div>
-    <div class="scope"><b>{result.evaluated} of {blocks}</b> blocks evaluated<br>
-    <b>{skipped}</b> not evaluated</div>
+    <div class="scope">{scope}</div>
   </header>
-  <div class="grid-2">{coverage_card(result)}{notes_card()}</div>
+  {top}
   {body}
   {footer_html(path, trace)}
 </main>

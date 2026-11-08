@@ -1,0 +1,91 @@
+import unittest
+from pathlib import Path
+
+from kevlint.config import Budget, Config
+from kevlint.parser import parse_trace
+from kevlint.report import render_html
+from kevlint.rules import run_rules
+
+FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
+SAMPLE = dict(
+    min_waiter_priority=40, budgets=[Budget("fusion_rt", 50)], semaphore_min_priority=40
+)
+
+
+def page(name, **settings):
+    trace = parse_trace(FIXTURES / f"{name}.txt")
+    config = Config("k.toml", **settings)
+    rules = run_rules(trace, config)
+    return render_html("t.txt", trace, None, rules=rules, config=config)
+
+
+class RulesPageTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.page = page("demo_inversion", **SAMPLE)
+
+    def test_overview_lists_each_rule(self):
+        self.assertIn("Results by rule", self.page)
+        for name in ("priority-inversion", "max-blocked-time", "no-semaphore-high-priority"):
+            self.assertIn(f'href="#rule-{name}"', self.page)
+            self.assertIn(f'id="rule-{name}"', self.page)
+
+    def test_banner_gives_the_overall_result(self):
+        self.assertIn('class="banner fail"', self.page)
+        self.assertIn("3 of 3 rules failed, 32 findings", self.page)
+
+    def test_inversion_section_keeps_its_cards(self):
+        self.assertIn("Priority inversions", self.page)
+        self.assertIn("blocks in the trace", self.page)
+
+    def test_budget_table_and_breach_evidence(self):
+        self.assertIn("Breaches (11)", self.page)
+        self.assertIn("THSEM, THMUTEX", self.page)
+        self.assertIn("wait call 1172, block start 1177, release 6175, block end 6179", self.page)
+        self.assertIn("249.094", self.page)
+        self.assertIn("at least 52.195 (still open at trace end)", self.page)
+
+    def test_semaphore_section(self):
+        self.assertIn("Findings (11)", self.page)
+        self.assertIn("at priority 40 or above", self.page)
+        self.assertIn("semaphores have no priority inheritance", self.page)
+
+    def test_passing_rules_say_what_was_checked(self):
+        fixed = page("demo_fixed", **SAMPLE)
+        self.assertIn('class="banner pass"', fixed)
+        self.assertIn("No block exceeded its budget.", fixed)
+        self.assertIn("No thread at priority 40 or above blocked on a semaphore.", fixed)
+
+    def test_missing_thread_warns_and_never_shows_pass(self):
+        settings = dict(SAMPLE)
+        wide = page("test_wide", **settings)
+        self.assertIn('class="banner warn"', wide)
+        self.assertIn("NOT EVALUATED", wide)
+        self.assertIn('role="alert"', wide)
+        self.assertIn("no thread named &#x27;fusion_rt&#x27; in this trace", wide)
+
+    def test_required_missing_thread_shows_an_error(self):
+        wide = page("test_wide", inversion=False, budgets=[Budget("fusion_rt", 50, required=True)])
+        self.assertIn('class="banner fail"', wide)
+        self.assertIn("required thread &#x27;fusion_rt&#x27; is not in this trace", wide)
+
+    def test_disabled_rule_is_named_and_has_no_section(self):
+        off = page(
+            "demo_fixed",
+            inversion=False,
+            budgets=[Budget("fusion_rt", 50)],
+            disabled=["priority-inversion", "no-semaphore-high-priority"],
+        )
+        self.assertIn("Not enabled: priority-inversion, no-semaphore-high-priority", off)
+        self.assertNotIn('id="rule-priority-inversion"', off)
+
+    def test_rule_styles_appear_only_with_a_config(self):
+        trace = parse_trace(FIXTURES / "demo_fixed.txt")
+        from kevlint.inversion import check
+
+        self.assertNotIn(".pill", render_html("t.txt", trace, check(trace)))
+        self.assertIn(".pill", self.page)
+
+
+if __name__ == "__main__":
+    unittest.main()
