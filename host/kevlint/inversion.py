@@ -52,6 +52,7 @@ class Violation:
     release_cycles: int
     holder_run_line: int
     holder_ready_line: int
+    middle_ready_line: int = None
 
     @property
     def duration_cycles(self):
@@ -237,6 +238,15 @@ def _holder_delay(history, block, run):
     return None
 
 
+def _ready_before(history, thread, run_index):
+    """The THREADY event that led directly to this run, or None if not in the trace."""
+    entries = history.get(thread, [])
+    position = bisect_left(entries, (run_index, -1))
+    if position > 0 and entries[position - 1][2] == READY:
+        return entries[position - 1][0]
+    return None
+
+
 def _qualifying_runs(block, runs, history):
     """Yield (run, holder priority) for each run that makes the block a violation."""
     for run in runs:
@@ -273,6 +283,7 @@ def _evaluate(block, runs, history, trace):
     middle = max(first_run, key=lambda t: time_total[t])
     run = first_run[middle]
     holder_run, holder_ready = _holder_delay(history, block, run)
+    middle_ready = _ready_before(history, middle, run.index)
     return Violation(
         kind=block.kind,
         sync_p=block.wait_call.fields["sync_p"],
@@ -294,6 +305,7 @@ def _evaluate(block, runs, history, trace):
         release_cycles=block.release.cycles,
         holder_run_line=trace.events[holder_run].line,
         holder_ready_line=trace.events[holder_ready].line,
+        middle_ready_line=None if middle_ready is None else trace.events[middle_ready].line,
     )
 
 

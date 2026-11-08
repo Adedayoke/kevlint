@@ -27,6 +27,20 @@ class HolderEvidenceLinesTest(unittest.TestCase):
         self.assertIn(":THRUNNING", lines[first.holder_run_line - 1])
         self.assertIn(":THREADY", lines[first.holder_ready_line - 1])
 
+    def test_first_violation_records_when_the_middle_became_ready(self):
+        _, result, lines = load("demo_inversion")
+        first = result.violations[0]
+        self.assertEqual(first.middle_ready_line, 1184)
+        self.assertLess(first.middle_ready_line, first.holder_ready_line)
+
+    def test_middle_ready_lines_are_the_middles_own_thready_events(self):
+        _, result, lines = load("demo_inversion")
+        for v in result.violations:
+            self.assertLess(v.middle_ready_line, v.middle_line)
+            text = lines[v.middle_ready_line - 1]
+            self.assertIn(":THREADY", text)
+            self.assertIn(f"pid:{v.middle[0]} tid:{v.middle[1]} ", text)
+
     def test_every_violation_points_at_the_holders_own_events(self):
         _, result, lines = load("demo_inversion")
         for v in result.violations:
