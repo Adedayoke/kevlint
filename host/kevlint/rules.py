@@ -2,7 +2,7 @@
 from collections import Counter
 from dataclasses import dataclass, field
 
-from .config import BLOCKING_STATES, INVERSION, MAX_BLOCKED
+from .config import BLOCKING_STATES, INVERSION, MAX_BLOCKED, NO_SEMAPHORE
 from .inversion import _scan, check
 
 PASS = "PASS"
@@ -205,6 +205,24 @@ def _max_blocked_rule(trace, budgets, waits, blocks):
     return rule
 
 
+def _no_semaphore_rule(trace, minimum, waits, blocks):
+    """Flag each entry to THSEM at or above minimum, using the priority on that event."""
+    rule = RuleResult(NO_SEMAPHORE, [], 0, Counter())
+    for wait in waits:
+        if wait.state != "THSEM":
+            continue
+        priority = wait.start.priority
+        if priority is None:
+            rule.not_evaluated["no priority on the THSEM event"] += 1
+            continue
+        rule.evaluated += 1
+        if priority >= minimum:
+            rule.findings.append(_finding(trace, wait, blocks))
+    worst = max((f.duration_cycles for f in rule.findings), default=None)
+    rule.worst_ms = None if worst is None else _ms(trace, worst)
+    return rule
+
+
 def run_rules(trace, config):
     """Return a RuleResult for each enabled rule."""
     rules = []
@@ -214,4 +232,6 @@ def run_rules(trace, config):
     blocks = {block.start.line: block for block in _scan(trace)[0]}
     if config.budgets is not None:
         rules.append(_max_blocked_rule(trace, config.budgets, waits, blocks))
+    if config.semaphore_min_priority is not None:
+        rules.append(_no_semaphore_rule(trace, config.semaphore_min_priority, waits, blocks))
     return rules

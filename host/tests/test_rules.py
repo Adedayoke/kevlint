@@ -156,6 +156,50 @@ class MissingThreadTest(unittest.TestCase):
         self.assertEqual(rule.status, NOT_EVALUATED)
 
 
+def semaphore_rule(name, minimum):
+    config = Config("k", inversion=False, semaphore_min_priority=minimum)
+    return run_rules(trace_of(name), config)[0]
+
+
+class NoSemaphoreTest(unittest.TestCase):
+    def test_inversion_fixture_flags_every_high_priority_entry(self):
+        rule = semaphore_rule("demo_inversion", 40)
+        self.assertEqual(rule.status, FAIL)
+        self.assertEqual(len(rule.findings), 11)
+        trace = trace_of("demo_inversion")
+        self.assertEqual({trace.thread_names[f.thread] for f in rule.findings}, {"fusion_rt"})
+        self.assertEqual({f.priority for f in rule.findings}, {50})
+
+    def test_a_block_still_open_at_trace_end_is_flagged(self):
+        rule = semaphore_rule("demo_inversion", 40)
+        self.assertEqual(sum(f.end_cycles is None for f in rule.findings), 1)
+
+    def test_finding_carries_its_evidence(self):
+        first = semaphore_rule("demo_inversion", 40).findings[0]
+        self.assertEqual(first.lines["block start"], 1177)
+        self.assertEqual(first.lines["wait call"], 1172)
+        self.assertEqual(first.sync_p, "0x0000001f5d627018")
+        self.assertIsNone(first.budget_ms)
+
+    def test_threshold_is_at_or_above(self):
+        self.assertEqual(len(semaphore_rule("demo_inversion", 50).findings), 11)
+        self.assertEqual(semaphore_rule("demo_inversion", 51).findings, [])
+
+    def test_a_low_threshold_catches_the_system_threads(self):
+        rule = semaphore_rule("demo_normal", 21)
+        self.assertEqual(len(rule.findings), 21)
+        self.assertEqual(rule.status, FAIL)
+
+    def test_mutex_and_normal_fixtures_pass_at_40(self):
+        for name in ("demo_normal", "demo_fixed", "test_wide"):
+            rule = semaphore_rule(name, 40)
+            self.assertEqual(rule.status, PASS, name)
+            self.assertGreater(rule.evaluated, 0, name)
+
+    def test_coverage_counts_every_semaphore_entry(self):
+        self.assertEqual(semaphore_rule("demo_normal", 40).evaluated, 22)
+
+
 class ConfiguredInversionTest(unittest.TestCase):
     def test_runs_with_the_configured_minimum(self):
         trace = trace_of("demo_inversion")
