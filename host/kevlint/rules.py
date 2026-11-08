@@ -3,6 +3,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 from .config import BLOCKING_STATES, INVERSION, MAX_BLOCKED, NO_SEMAPHORE
+from .explain import SYNC_OBJECT
 from .inversion import _scan, check
 
 PASS = "PASS"
@@ -73,6 +74,61 @@ class RuleResult:
     def coverage(self):
         skipped = sum(self.not_evaluated.values())
         return f"{self.evaluated} evaluated, {skipped} not evaluated"
+
+
+@dataclass
+class RootCause:
+    """Findings that share a thread and sync object, counted per rule."""
+
+    thread: tuple
+    sync_p: str
+    state: str
+    counts: dict = field(default_factory=dict)
+
+    @property
+    def total(self):
+        return sum(self.counts.values())
+
+
+def root_causes(rules):
+    """Group all findings by thread and sync_p, most findings first.
+
+    A finding with no visible sync object groups by thread and state instead,
+    so it is never merged with a sync object it may have nothing to do with.
+    """
+    causes = {}
+    for rule in rules:
+        for finding in rule.findings:
+            if rule.inversion is not None:
+                thread, sync_p, state = finding.waiter, finding.sync_p, finding.kind
+            else:
+                thread, sync_p, state = finding.thread, finding.sync_p, finding.state
+            key = (thread, sync_p) if sync_p is not None else (thread, None, state)
+            cause = causes.setdefault(key, RootCause(thread, sync_p, state))
+            cause.counts[rule.name] = cause.counts.get(rule.name, 0) + 1
+    return sorted(causes.values(), key=lambda cause: -cause.total)
+
+
+def root_cause_text(trace, cause):
+    name = trace.thread_names.get(cause.thread, "unnamed")
+    if cause.sync_p is None:
+        return f"{name} in {cause.state}"
+    return f"{name} blocking on {SYNC_OBJECT.get(cause.state, cause.state)} {cause.sync_p}"
+
+
+def root_cause_headline(trace, rules):
+    """One line saying findings from different rules share causes, or None if they don't."""
+    causes = root_causes(rules)
+    if not any(len(cause.counts) > 1 for cause in causes):
+        return None
+    findings = sum(cause.total for cause in causes)
+    count = sum(1 for rule in rules if rule.findings)
+    if len(causes) == 1:
+        return (
+            f"{findings} findings from {count} rules, all from 1 root cause: "
+            f"{root_cause_text(trace, causes[0])}"
+        )
+    return f"{findings} findings from {count} rules, from {len(causes)} root causes"
 
 
 def line_text(lines):

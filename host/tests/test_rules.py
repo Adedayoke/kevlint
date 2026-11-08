@@ -3,7 +3,18 @@ from pathlib import Path
 
 from kevlint.config import Budget, Config
 from kevlint.parser import parse_trace
-from kevlint.rules import ERROR, FAIL, NOT_EVALUATED, PASS, collect_waits, overall_status, run_rules
+from kevlint.rules import (
+    ERROR,
+    FAIL,
+    NOT_EVALUATED,
+    PASS,
+    collect_waits,
+    overall_status,
+    root_cause_headline,
+    root_cause_text,
+    root_causes,
+    run_rules,
+)
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 RT = Budget("fusion_rt", 50)
@@ -211,6 +222,68 @@ class ConfiguredInversionTest(unittest.TestCase):
     def test_disabled_rule_is_absent(self):
         config = Config("k", inversion=False, budgets=[RT])
         self.assertEqual([r.name for r in run_rules(trace_of("demo_fixed"), config)], ["max-blocked-time"])
+
+
+class RootCauseTest(unittest.TestCase):
+    SAMPLE = dict(min_waiter_priority=40, budgets=[RT], semaphore_min_priority=40)
+
+    def rules(self, name, **settings):
+        return run_rules(trace_of(name), Config("k", **settings))
+
+    def test_all_three_rules_share_one_cause_in_the_demo(self):
+        trace = trace_of("demo_inversion")
+        rules = self.rules("demo_inversion", **self.SAMPLE)
+        causes = root_causes(rules)
+        self.assertEqual(len(causes), 1)
+        self.assertEqual(causes[0].total, 32)
+        self.assertEqual(
+            causes[0].counts,
+            {
+                "priority-inversion": 10,
+                "max-blocked-time": 11,
+                "no-semaphore-high-priority": 11,
+            },
+        )
+        self.assertEqual(
+            root_cause_headline(trace, rules),
+            "32 findings from 3 rules, all from 1 root cause: "
+            "fusion_rt blocking on semaphore 0x0000001f5d627018",
+        )
+
+    def test_passing_trace_has_no_causes(self):
+        rules = self.rules("demo_fixed", **self.SAMPLE)
+        self.assertEqual(root_causes(rules), [])
+        self.assertIsNone(root_cause_headline(trace_of("demo_fixed"), rules))
+
+    def test_findings_from_one_rule_make_no_shared_claim(self):
+        trace = trace_of("demo_inversion")
+        rules = self.rules("demo_inversion", inversion=False, semaphore_min_priority=40)
+        self.assertEqual(len(root_causes(rules)), 1)
+        self.assertIsNone(root_cause_headline(trace, rules))
+
+    def test_several_causes_are_counted_and_sorted(self):
+        trace = trace_of("demo_normal")
+        rules = self.rules(
+            "demo_normal",
+            inversion=False,
+            budgets=[Budget("iousb_poll_tq", 50)],
+            semaphore_min_priority=21,
+        )
+        causes = root_causes(rules)
+        self.assertGreater(len(causes), 1)
+        self.assertEqual([c.total for c in causes], sorted((c.total for c in causes), reverse=True))
+        self.assertTrue(any(len(c.counts) > 1 for c in causes))
+        self.assertRegex(root_cause_headline(trace, rules), r"from \d+ root causes$")
+
+    def test_finding_with_no_sync_object_is_never_merged_with_one(self):
+        rules = self.rules(
+            "demo_normal",
+            inversion=False,
+            budgets=[Budget("fusion_server", 40, ("THREPLY",))],
+        )
+        cause = root_causes(rules)[0]
+        self.assertIsNone(cause.sync_p)
+        self.assertEqual(root_cause_text(trace_of("demo_normal"), cause), "fusion_server in THREPLY")
 
 
 class OverallStatusTest(unittest.TestCase):

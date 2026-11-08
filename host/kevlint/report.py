@@ -11,7 +11,17 @@ from .config import INVERSION, MAX_BLOCKED
 from .explain import CHECK_NOTE, WHERE_LABEL, line_list, pattern_key
 from .inversion import HOLDER_NOTE, TYPICAL_FIXES, boost_text
 from .patterns import group_patterns
-from .rules import ERROR, FAIL, NOT_EVALUATED, PASS, line_text, overall_status
+from .rules import (
+    ERROR,
+    FAIL,
+    NOT_EVALUATED,
+    PASS,
+    line_text,
+    overall_status,
+    root_cause_headline,
+    root_cause_text,
+    root_causes,
+)
 from .timeline import BLOCKED, READY, RUNNING, thread_segments
 
 WIDTH = 1000
@@ -62,6 +72,9 @@ a.rule-link { color: inherit; font-family: var(--mono); }
 .rule-card { display: grid; gap: 12px; }
 .rule-card h3 { font-size: 13px; font-weight: 600; margin: 0; }
 .rules-off { color: var(--muted); font-size: 13px; margin-top: 10px; }
+.causes { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.causes strong { display: block; font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
+.cause-links { color: var(--ink-2); font-size: 13px; }
 .rule-card .warn { margin-top: 0; }
 """
 
@@ -810,6 +823,28 @@ def rules_overview(rules, config):
 </section>"""
 
 
+def root_causes_card(rules, trace):
+    """List the causes when different rules' findings share one, else nothing."""
+    if root_cause_headline(trace, rules) is None:
+        return ""
+    items = []
+    for cause in root_causes(rules):
+        links = ", ".join(
+            f'<a class="rule-link" href="#{esc(rule_anchor(name))}">{count} {esc(name)}</a>'
+            for name, count in cause.counts.items()
+        )
+        items.append(
+            f"<li><strong>{esc(root_cause_text(trace, cause))}</strong>"
+            f'<span class="cause-links">{links}</span></li>'
+        )
+    return f"""
+<section class="card">
+  <div class="eyebrow">Root causes</div>
+  <ul class="causes">{"".join(items)}</ul>
+  <p class="rules-off">Findings are grouped by thread and sync object.</p>
+</section>"""
+
+
 def rule_coverage(rule):
     reasons = "".join(
         f"<li><b>{count}</b><span>{esc(reason)}</span></li>"
@@ -957,7 +992,10 @@ def rule_section(rule, trace, config, explanations):
     return semaphore_section(rule, trace, config.semaphore_min_priority)
 
 
-def rules_summary(rules):
+def rules_summary(rules, trace):
+    headline = root_cause_headline(trace, rules)
+    if headline is not None:
+        return headline
     failed = sum(rule.status in (FAIL, ERROR) for rule in rules)
     skipped = sum(rule.status == NOT_EVALUATED for rule in rules)
     findings = sum(len(rule.findings) for rule in rules)
@@ -981,9 +1019,9 @@ def render_rules_html(path, trace, rules, config, explanations):
         STATUS_CLASS[verdict],
         STATUS_ICON[verdict],
         "rules",
-        rules_summary(rules),
+        rules_summary(rules, trace),
         scope,
-        rules_overview(rules, config),
+        rules_overview(rules, config) + root_causes_card(rules, trace),
         body,
         CSS + (EXPLANATION_CSS if explanations else "") + RULES_CSS,
     )

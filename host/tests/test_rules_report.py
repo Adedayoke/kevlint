@@ -32,7 +32,25 @@ class RulesPageTest(unittest.TestCase):
 
     def test_banner_gives_the_overall_result(self):
         self.assertIn('class="banner fail"', self.page)
-        self.assertIn("3 of 3 rules failed, 32 findings", self.page)
+        self.assertIn(
+            "32 findings from 3 rules, all from 1 root cause: "
+            "fusion_rt blocking on semaphore 0x0000001f5d627018",
+            self.page,
+        )
+
+    def test_root_causes_card_links_to_each_rule(self):
+        self.assertIn("Root causes", self.page)
+        for count, name in (
+            (10, "priority-inversion"),
+            (11, "max-blocked-time"),
+            (11, "no-semaphore-high-priority"),
+        ):
+            self.assertIn(f'href="#rule-{name}">{count} {name}</a>', self.page)
+
+    def test_a_single_rule_has_no_root_cause_claim(self):
+        one = page("demo_inversion", inversion=False, semaphore_min_priority=40)
+        self.assertNotIn("Root causes", one)
+        self.assertIn("1 of 1 rule failed, 11 findings", one)
 
     def test_inversion_section_keeps_its_cards(self):
         self.assertIn("Priority inversions", self.page)

@@ -144,6 +144,18 @@ def _rule_details(entry, rule):
     return lines
 
 
+def _root_causes(entry):
+    headline = rule_status.root_cause_headline(entry.trace, entry.rules)
+    if headline is None:
+        return []
+    lines = [f"#### Root causes in `{entry.path}`", "", f"**{headline}**", ""]
+    for cause in rule_status.root_causes(entry.rules):
+        counts = ", ".join(f"{count} `{name}`" for name, count in cause.counts.items())
+        lines.append(f"- {rule_status.root_cause_text(entry.trace, cause)}: {counts}")
+    lines.append("")
+    return lines
+
+
 def render_rule_summary(entries):
     lines = [
         "### kevlint results by rule",
@@ -157,6 +169,7 @@ def render_rule_summary(entries):
     for entry in entries:
         if entry.rules is None:
             continue
+        lines.extend(_root_causes(entry))
         if entry.result is not None and entry.result.violations:
             lines.extend(_explanation(entry))
         for rule in entry.rules:

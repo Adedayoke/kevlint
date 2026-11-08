@@ -17,7 +17,14 @@ from .inversion import HOLDER_NOTE, boost_text, check
 from .llm import LlmClient, load_config
 from .parser import TraceError, parse_trace
 from .report import render_html
-from .rules import line_text, overall_status, run_rules
+from .rules import (
+    line_text,
+    overall_status,
+    root_cause_headline,
+    root_cause_text,
+    root_causes,
+    run_rules,
+)
 from .summary import Entry, append_summary
 
 EXPLAIN_HELP = "add AI-generated explanations of violations (never changes the exit status)"
@@ -162,6 +169,14 @@ def report_rules(path, trace, rules, config, out):
             print(f"  WARNING: {warning}", file=out)
         for error in rule.errors:
             print(f"  ERROR: {error}", file=out)
+
+    headline = root_cause_headline(trace, rules)
+    if headline is not None:
+        print("\nROOT CAUSES", file=out)
+        print(f"  {headline}", file=out)
+        for cause in root_causes(rules):
+            counts = ", ".join(f"{name} {count}" for name, count in cause.counts.items())
+            print(f"  - {root_cause_text(trace, cause)}: {counts}", file=out)
 
     print("\nRESULTS BY RULE", file=out)
     for rule in rules:
