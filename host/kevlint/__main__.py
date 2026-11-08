@@ -5,10 +5,9 @@ Exit status: 0 no violations, 1 violations found, 2 the trace could not be read.
 import argparse
 import sys
 
-from .inversion import check
+from .inversion import HOLDER_NOTE, check
 from .parser import TraceError, parse_trace
-
-HOLDER_NOTE = "inferred, not named by the trace"
+from .report import render_html
 
 
 def report(path, trace, result, out):
@@ -67,6 +66,7 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     check_command = commands.add_parser("check", help="check a traceprinter text file")
     check_command.add_argument("trace", help="output of traceprinter")
+    check_command.add_argument("--html", metavar="FILE", help="also write an HTML report")
     args = parser.parse_args(argv)
 
     try:
@@ -77,6 +77,14 @@ def main(argv=None):
 
     result = check(trace)
     report(args.trace, trace, result, sys.stdout)
+    if args.html:
+        try:
+            with open(args.html, "w", encoding="utf-8") as out:
+                out.write(render_html(args.trace, trace, result))
+        except OSError as error:
+            print(f"kevlint: cannot write HTML report: {error}", file=sys.stderr)
+            return 2
+        print(f"HTML report: {args.html}")
     return 1 if result.violations else 0
 
 

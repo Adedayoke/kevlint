@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -53,6 +54,23 @@ class CliTest(unittest.TestCase):
             "FAIL",
         ):
             self.assertIn(text, done.stdout)
+
+    def test_html_keeps_the_exit_code_and_terminal_output(self):
+        with tempfile.TemporaryDirectory() as folder:
+            for name, code in (("demo_inversion", 1), ("demo_normal", 0)):
+                target = Path(folder) / f"{name}.html"
+                trace = str(FIXTURES / f"{name}.txt")
+                plain = run("check", trace)
+                done = run("check", trace, "--html", str(target))
+                self.assertEqual(done.returncode, code, done.stdout + done.stderr)
+                self.assertTrue(done.stdout.startswith(plain.stdout))
+                self.assertTrue(target.read_text(encoding="utf-8").startswith("<!doctype html>"))
+
+    def test_unwritable_html_path_is_exit_2(self):
+        target = FIXTURES / "no_such_directory" / "report.html"
+        done = run("check", str(FIXTURES / "demo_normal.txt"), "--html", str(target))
+        self.assertEqual(done.returncode, 2)
+        self.assertIn("cannot write HTML report", done.stderr)
 
     def test_unreadable_trace_is_exit_2(self):
         done = run("check", str(FIXTURES / "does_not_exist.txt"))
