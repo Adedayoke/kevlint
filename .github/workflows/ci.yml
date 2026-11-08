@@ -27,6 +27,7 @@ jobs:
           PYTHONPATH: host
         run: >-
           python3 -m kevlint check-all ci/traces.txt
+          --config kevlint.toml
           --reports-dir reports
           --summary "$GITHUB_STEP_SUMMARY"
 
@@ -56,3 +57,4 @@ jobs:
         with:
           trace: fixtures/demo_fixed.txt
           report: reports/demo_fixed.html
+          config: kevlint.toml

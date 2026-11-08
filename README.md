@@ -43,11 +43,30 @@ kevlint, not the model. Explanations never change the
 exit status. `--debug` prints a message to stderr if the endpoint refused the
 seed and the request was retried without it.
 
+`--config kevlint.toml` selects the rules. The file is only read when you pass
+this flag. Without it, only priority-inversion runs, as above.
+
+| Rule | Settings |
+|---|---|
+| `priority-inversion` | `enabled`, `min_waiter_priority` |
+| `max-blocked-time` | `enabled`, `budgets`: `thread`, `max_ms`, optional `states` and `required` |
+| `no-semaphore-high-priority` | `enabled`, `min_priority` |
+
+See `kevlint.toml` for a working sample. Results, coverage and evidence are shown
+per rule in the terminal, HTML report and summary. Any unknown setting, rule or
+state name exits 2, so a typo cannot silently turn a check off.
+
+A budget counts time in `THSEM` and `THMUTEX` unless `states` lists others, such
+as `THSEND` or `THREPLY`. A breach is strictly longer than `max_ms`. If a budget's
+thread is not in a trace, that budget is `NOT EVALUATED` with a warning, or exit 2
+with `required = true`. The 50 ms in the sample suits the QEMU demos only: QEMU
+timing is not realistic, so set real budgets from traces of the real target.
+
 | Exit status | Meaning |
 |---|---|
 | 0 | No violations |
 | 1 | At least one violation |
-| 2 | A trace, list or output file could not be used |
+| 2 | A trace, list, config or output file could not be used, or a required thread is missing |
 
 ## GitHub Action
 

@@ -9,6 +9,10 @@ inputs:
     description: Where to write the HTML report.
     required: false
     default: kevlint-report.html
+  config:
+    description: Optional kevlint.toml rules file. Without it, only priority-inversion runs.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -19,8 +23,12 @@ runs:
         PYTHONPATH: ${{ github.action_path }}/host
         KEVLINT_TRACE: ${{ inputs.trace }}
         KEVLINT_REPORT: ${{ inputs.report }}
+        KEVLINT_CONFIG: ${{ inputs.config }}
       run: |
         mkdir -p "$(dirname "$KEVLINT_REPORT")"
+        config_args=()
+        if [ -n "$KEVLINT_CONFIG" ]; then config_args=(--config "$KEVLINT_CONFIG"); fi
         python3 -m kevlint check "$KEVLINT_TRACE" \
           --html "$KEVLINT_REPORT" \
-          --summary "$GITHUB_STEP_SUMMARY"
+          --summary "$GITHUB_STEP_SUMMARY" \
+          "${config_args[@]}"
