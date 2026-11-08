@@ -800,6 +800,7 @@ def footer_html(path, trace):
 </footer>"""
 
 
+VISIBLE_ROWS = 3
 STATUS_CLASS = {PASS: "pass", FAIL: "fail", ERROR: "fail", NOT_EVALUATED: "warn"}
 STATUS_ICON = {PASS: "✓", FAIL: "✕", ERROR: "✕", NOT_EVALUATED: "!"}
 VISIBILITY_NOTE = (
@@ -918,6 +919,27 @@ def budgets_table(rule):
     )
 
 
+def worst_rows(head, rows, durations, noun):
+    """Show the worst rows, with every row in trace order behind a toggle."""
+    wrap = lambda body: (
+        f'<div class="scroll"><table><thead><tr>{head}</tr></thead>'
+        f"<tbody>{body}</tbody></table></div>"
+    )
+    order = sorted(range(len(rows)), key=lambda i: durations[i], reverse=True)[:VISIBLE_ROWS]
+    shown = wrap("".join(rows[i] for i in order))
+    if len(rows) <= VISIBLE_ROWS:
+        return shown
+    return (
+        f"{shown}<details><summary>Show all {len(rows)} {noun}</summary>"
+        f'{wrap("".join(rows))}</details>'
+    )
+
+
+def rows_heading(label, count):
+    shown = f", worst {VISIBLE_ROWS} shown" if count > VISIBLE_ROWS else ""
+    return f"<h3>{label} ({count}){shown}</h3>"
+
+
 def breaches_table(rule, trace):
     worst = max(rule.findings, key=lambda f: f.duration_cycles)
     rows = []
@@ -935,12 +957,12 @@ def breaches_table(rule, trace):
             f"<td>{holder_cell(finding, trace)}</td>"
             f"<td>{esc(line_text(finding.lines))}</td></tr>"
         )
-    return (
-        '<div class="scroll"><table><thead><tr><th>#</th><th>Thread</th><th>Priority</th>'
-        "<th>State</th><th>sync_p</th><th>Blocked (ms)</th><th>Budget (ms)</th><th>Over by (ms)</th>"
-        "<th>Start (s)</th><th>Holder (inferred)</th><th>Evidence lines</th></tr></thead>"
-        f'<tbody>{"".join(rows)}</tbody></table></div>'
+    head = (
+        "<th>#</th><th>Thread</th><th>Priority</th><th>State</th><th>sync_p</th>"
+        "<th>Blocked (ms)</th><th>Budget (ms)</th><th>Over by (ms)</th><th>Start (s)</th>"
+        "<th>Holder (inferred)</th><th>Evidence lines</th>"
     )
+    return worst_rows(head, rows, [f.duration_cycles for f in rule.findings], "breaches")
 
 
 def semaphore_table(rule, trace):
@@ -957,16 +979,16 @@ def semaphore_table(rule, trace):
             f"<td>{holder_cell(finding, trace)}</td>"
             f"<td>{esc(line_text(finding.lines))}</td></tr>"
         )
-    return (
-        '<div class="scroll"><table><thead><tr><th>#</th><th>Thread</th><th>Priority</th>'
-        "<th>sync_p</th><th>Blocked (ms)</th><th>Start (s)</th><th>Holder (inferred)</th>"
-        f'<th>Evidence lines</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
+    head = (
+        "<th>#</th><th>Thread</th><th>Priority</th><th>sync_p</th><th>Blocked (ms)</th>"
+        "<th>Start (s)</th><th>Holder (inferred)</th><th>Evidence lines</th>"
     )
+    return worst_rows(head, rows, [f.duration_cycles for f in rule.findings], "findings")
 
 
 def max_blocked_section(rule, trace):
     breaches = (
-        f"<div><h3>Breaches ({len(rule.findings)})</h3>{breaches_table(rule, trace)}</div>"
+        f'<div>{rows_heading("Breaches", len(rule.findings))}{breaches_table(rule, trace)}</div>'
         if rule.findings
         else '<p class="empty">No block exceeded its budget.</p>'
     )
@@ -984,7 +1006,7 @@ def max_blocked_section(rule, trace):
 
 def semaphore_section(rule, trace, minimum):
     findings = (
-        f"<div><h3>Findings ({len(rule.findings)})</h3>{semaphore_table(rule, trace)}</div>"
+        f'<div>{rows_heading("Findings", len(rule.findings))}{semaphore_table(rule, trace)}</div>'
         f'<p class="fix"><strong>Typical fix</strong>{esc(TYPICAL_FIXES["THSEM"])}</p>'
         if rule.findings
         else f'<p class="empty">No thread at priority {minimum} or above blocked on a semaphore.</p>'

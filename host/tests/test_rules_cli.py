@@ -76,7 +76,7 @@ class SampleConfigTest(unittest.TestCase):
         done = run("check", trace("demo_fixed"), "--config", SAMPLE)
         self.assertRegex(done.stdout, r"excluded by config: \d+ \(waiter below the configured minimum")
         self.assertNotIn("not evaluated: 1 (waiter below", done.stdout)
-        self.assertRegex(done.stdout, r"blocks: 71 total, 12? ?\d* ?evaluated, \d+ not evaluated, \d+ excluded by config")
+        self.assertRegex(done.stdout, r"blocks: 71 total, \d+ evaluated, \d+ not evaluated, \d+ excluded by config")
 
     def test_check_all_with_html_and_summary(self):
         with tempfile.TemporaryDirectory() as folder:

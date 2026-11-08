@@ -76,6 +76,32 @@ class RulesPageTest(unittest.TestCase):
         self.assertIn("249.094", self.page)
         self.assertIn("at least 52.195 (still open at trace end)", self.page)
 
+    def visible_rows(self, label, summary):
+        start = self.page.index(f"{label} (11), worst 3 shown")
+        return self.page[start : self.page.index(f"<summary>{summary}", start)].count("<tr")
+
+    def test_only_the_worst_three_rows_are_visible(self):
+        self.assertEqual(self.visible_rows("Breaches", "Show all 11 breaches"), 4)
+        self.assertEqual(self.visible_rows("Findings", "Show all 11 findings"), 4)
+
+    def test_worst_row_comes_first(self):
+        start = self.page.index("Breaches (11), worst 3 shown")
+        section = self.page[start : self.page.index("<summary>Show all 11 breaches", start)]
+        self.assertLess(section.index("249.094"), section.index("</tbody>"))
+        first_row = section[section.index("<tbody>") : section.index("</tr>", section.index("<tbody>"))]
+        self.assertIn("249.094", first_row)
+        self.assertIn('class="worst"', first_row)
+
+    def test_show_all_lists_every_row(self):
+        start = self.page.index("<summary>Show all 11 breaches")
+        table = self.page[start : self.page.index("</details>", start)]
+        self.assertEqual(table.count("<tr"), 12)
+
+    def test_three_or_fewer_rows_have_no_toggle(self):
+        few = page("demo_inversion", inversion=False, budgets=[Budget("fusion_rt", 200)])
+        self.assertIn("Breaches (2)</h3>", few)
+        self.assertNotIn("Show all", few)
+
     def test_semaphore_section(self):
         self.assertIn("Findings (11)", self.page)
         self.assertIn("at priority 40 or above", self.page)
