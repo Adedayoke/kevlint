@@ -1,0 +1,26 @@
+name: kevlint
+description: Check a QNX kernel trace for priority inversions and write an HTML report.
+
+inputs:
+  trace:
+    description: Path to traceprinter text output, captured with tracelogger -w.
+    required: true
+  report:
+    description: Where to write the HTML report.
+    required: false
+    default: kevlint-report.html
+
+runs:
+  using: composite
+  steps:
+    - name: Run kevlint
+      shell: bash
+      env:
+        PYTHONPATH: ${{ github.action_path }}/host
+        KEVLINT_TRACE: ${{ inputs.trace }}
+        KEVLINT_REPORT: ${{ inputs.report }}
+      run: |
+        mkdir -p "$(dirname "$KEVLINT_REPORT")"
+        python3 -m kevlint check "$KEVLINT_TRACE" \
+          --html "$KEVLINT_REPORT" \
+          --summary "$GITHUB_STEP_SUMMARY"

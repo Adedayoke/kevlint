@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Tests and trace checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Run unit tests
+        run: python3 -m unittest discover -s host/tests -t host
+
+      - name: Check listed traces
+        env:
+          PYTHONPATH: host
+        run: >-
+          python3 -m kevlint check-all ci/traces.txt
+          --reports-dir reports
+          --summary "$GITHUB_STEP_SUMMARY"
+
+      # Runs even when the check fails: a red build is when the report matters.
+      - name: Upload HTML reports
+        id: upload
+        if: ${{ always() && hashFiles('reports/*.html') != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: kevlint-reports
+          path: reports/*.html
+          if-no-files-found: error
+
+      - name: Link the reports from the summary
+        if: ${{ always() && steps.upload.outputs.artifact-url != '' }}
+        env:
+          REPORTS_URL: ${{ steps.upload.outputs.artifact-url }}
+        run: echo "[Download the HTML reports]($REPORTS_URL)" >> "$GITHUB_STEP_SUMMARY"
+
+  action:
+    name: Reusable action works
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./
+        with:
+          trace: fixtures/demo_fixed.txt
+          report: reports/demo_fixed.html
