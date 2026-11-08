@@ -2,7 +2,7 @@ import re
 import unittest
 from pathlib import Path
 
-from kevlint.inversion import TYPICAL_FIX, check
+from kevlint.inversion import TYPICAL_FIXES, check
 from kevlint.parser import parse_trace
 from kevlint.report import render_html
 
@@ -34,7 +34,7 @@ class InversionReportTest(unittest.TestCase):
             self.assertIn(f"<code>{name}</code>", self.page)
 
     def test_typical_fix_is_on_each_pattern(self):
-        self.assertEqual(self.page.count(TYPICAL_FIX), 1)
+        self.assertEqual(self.page.count(TYPICAL_FIXES["THSEM"]), 1)
         self.assertIn("Typical fix", self.page)
 
     def test_timeline_has_one_lane_per_role(self):
@@ -82,7 +82,7 @@ class PassReportTest(unittest.TestCase):
     def test_pass_has_no_pattern_card(self):
         page, _, _ = render("demo_normal")
         self.assertNotIn('class="card pattern"', page)
-        self.assertNotIn(TYPICAL_FIX, page)
+        self.assertNotIn(TYPICAL_FIXES["THSEM"], page)
 
 
 class SelfContainedTest(unittest.TestCase):
@@ -114,6 +114,30 @@ class EscapingTest(unittest.TestCase):
         page, _, _ = render("demo_inversion", rename)
         self.assertNotIn(hostile, page)
         self.assertIn("&lt;script&gt;", page)
+
+
+class TypicalFixByLockTest(unittest.TestCase):
+    def page_with_kinds(self, *kinds):
+        trace = parse_trace(FIXTURES / "demo_inversion.txt")
+        result = check(trace)
+        for index, violation in enumerate(result.violations):
+            violation.kind = kinds[index % len(kinds)]
+        return render_html("demo_inversion.txt", trace, result)
+
+    def test_semaphore_pattern_suggests_a_mutex(self):
+        page = self.page_with_kinds("THSEM")
+        self.assertIn(TYPICAL_FIXES["THSEM"], page)
+        self.assertNotIn(TYPICAL_FIXES["THMUTEX"], page)
+
+    def test_mutex_pattern_suggests_checking_inheritance(self):
+        page = self.page_with_kinds("THMUTEX")
+        self.assertIn(TYPICAL_FIXES["THMUTEX"], page)
+        self.assertNotIn(TYPICAL_FIXES["THSEM"], page)
+
+    def test_mixed_pattern_shows_both(self):
+        page = self.page_with_kinds("THSEM", "THMUTEX")
+        self.assertIn(TYPICAL_FIXES["THSEM"], page)
+        self.assertIn(TYPICAL_FIXES["THMUTEX"], page)
 
 
 if __name__ == "__main__":

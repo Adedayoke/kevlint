@@ -13,10 +13,13 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 
 HOLDER_NOTE = "inferred, not named by the trace"
-TYPICAL_FIX = (
-    "Protect this resource with a mutex (QNX mutexes use priority inheritance) "
-    "instead of a semaphore."
-)
+TYPICAL_FIXES = {
+    "THSEM": (
+        "Protect this resource with a mutex (QNX mutexes use priority inheritance) "
+        "instead of a semaphore."
+    ),
+    "THMUTEX": "Check that this mutex is not configured without priority inheritance.",
+}
 
 RUNNING = "THRUNNING"
 READY = "THREADY"

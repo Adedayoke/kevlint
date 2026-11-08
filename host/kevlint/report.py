@@ -7,7 +7,7 @@ script only adds richer tooltips over the SVG <title> fallback.
 import html
 import math
 
-from .inversion import HOLDER_NOTE, TYPICAL_FIX
+from .inversion import HOLDER_NOTE, TYPICAL_FIXES
 from .patterns import group_patterns
 from .timeline import BLOCKED, READY, RUNNING, thread_segments
 
@@ -427,6 +427,14 @@ def occurrences_table(pattern, trace):
     )
 
 
+def fix_lines(pattern):
+    kinds = sorted({v.kind for v in pattern.occurrences}, reverse=True)
+    return "".join(
+        f'<p class="fix"><strong>Typical fix</strong>{esc(TYPICAL_FIXES[kind])}</p>'
+        for kind in kinds
+    )
+
+
 def pattern_card(pattern, trace):
     worst = pattern.worst
     lanes = [
@@ -450,7 +458,7 @@ def pattern_card(pattern, trace):
     <span class="chip">worst block <b>{worst_seconds:.3f} s</b></span>
     <span class="chip mono">{esc(worst.kind)}</span>
   </div>
-  <p class="fix"><strong>Typical fix</strong>{esc(TYPICAL_FIX)}</p>
+  {fix_lines(pattern)}
   <div>
     <div class="eyebrow">Worst occurrence</div>
     <div class="scroll">{timeline_svg(trace, worst, lanes)}</div>
