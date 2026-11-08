@@ -73,7 +73,7 @@ a.rule-link { color: inherit; font-family: var(--mono); }
 .rule-card h3 { font-size: 13px; font-weight: 600; margin: 0; }
 .rules-off { color: var(--muted); font-size: 13px; margin-top: 10px; }
 .meter i.skipped, .meter-key i.skipped { background: var(--warning); }
-.meter i.excluded, .meter-key i.excluded { background: var(--grid); }
+.meter i.excluded, .meter-key i.excluded { background: var(--muted); opacity: .45; }
 .meter-key { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: -6px 0 12px;
   color: var(--ink-2); font-size: 12.5px; }
 .meter-key span { display: inline-flex; align-items: center; gap: 6px; }
