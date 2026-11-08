@@ -1,0 +1,19 @@
+# kevlint rules for the demo fixtures. Use with: kevlint check <trace> --config kevlint.toml
+#
+# The 50 ms budget suits these QEMU demos only. QEMU timing is not realistic, so
+# set budgets for a real product from traces captured on the real target.
+
+[rules.priority-inversion]
+enabled = true
+min_waiter_priority = 40
+
+[rules.max-blocked-time]
+enabled = true
+# states defaults to ["THSEM", "THMUTEX"]. Add others to opt in, for example
+# states = ["THSEM", "THMUTEX", "THSEND", "THREPLY"].
+# required = true makes kevlint exit 2 if the thread is not in a trace.
+budgets = [{ thread = "fusion_rt", max_ms = 50 }]
+
+[rules.no-semaphore-high-priority]
+enabled = true
+min_priority = 40
