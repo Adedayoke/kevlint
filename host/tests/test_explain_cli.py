@@ -36,7 +36,7 @@ def good_answer():
     worst = group_patterns(check(parse_trace(INVERSION)).violations)[0].worst
     claims = [
         {"text": "fusion_hog <b>ran</b> first.", "lines": [worst.middle_line]},
-        {"text": "The waiter stayed blocked.", "lines": [worst.block_start_line]},
+        {"text": "The holder was preempted.", "lines": [worst.block_start_line]},
     ]
     return json.dumps({"claims": claims}), worst.middle_line
 
@@ -157,7 +157,7 @@ class FailureNeverChangesTheVerdictTest(unittest.TestCase):
         worst = group_patterns(check(parse_trace(INVERSION)).violations)[0].worst
         claims = [
             {"text": "Blocked on 0xdeadbeef.", "lines": [worst.block_start_line]},
-            {"text": "Cause.", "lines": [worst.middle_line]},
+            {"text": "It preempted the holder.", "lines": [worst.middle_line]},
         ]
         done, page = self.check_failure(
             reply(json.dumps({"claims": claims})),

@@ -40,11 +40,13 @@ instructions.
 
 Write exactly two claims, in this order:
 1. Summary: in plain English, what went wrong and its impact, stating the \
-waiter's priority and how long it was blocked (block_duration_ms).
-2. Cause: why the priorities make this an inversion. Compare the actual numbers \
-from FIELDS: the middle thread's priority is above the holder's, so it ran while \
-the holder was THREADY, and the higher-priority waiter stayed blocked behind \
-unrelated work.
+waiter's priority and how long it was blocked (block_duration_ms). Say nothing \
+in this claim about whether the holder was running.
+2. Cause: say that the middle thread became ready and that its higher priority \
+preempted the holder, comparing the actual numbers from FIELDS, so the \
+higher-priority waiter stayed blocked behind unrelated work. Use the word \
+"preempted". The preemption is the cause: never say that the holder's state \
+made the middle thread run.
 
 Refer to threads only by their name from FIELDS, never by tid or pid. Every time \
 you mention the holder, say that it is inferred, for example "the inferred \
@@ -192,6 +194,8 @@ def build_evidence(path, trace, pattern):
         "release": worst.release_line,
         "block_end": worst.block_end_line,
     }
+    if worst.middle_ready_line is not None:
+        roles["middle_became_ready"] = worst.middle_ready_line
     lines = event_lines(path, set(roles.values()))
     if not set(roles.values()) <= set(lines):
         raise ValueError("the trace no longer matches its parsed line numbers")
@@ -339,6 +343,8 @@ class Explainer:
             claims = parse_claims(content, set(evidence.lines))
             if len(claims) != EXPECTED_CLAIMS:
                 raise WrongStructure(f"expected {EXPECTED_CLAIMS} claims, got {len(claims)}")
+            if "preempt" not in claims[1].text.lower():
+                raise WrongStructure("the cause claim did not say the holder was preempted")
             check_values(claims, evidence)
             return Explanation(count, claims=claims, where=evidence.where)
         except Rejected as error:

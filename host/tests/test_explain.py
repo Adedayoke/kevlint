@@ -49,8 +49,9 @@ class FakeClient:
 
 class PromptTest(unittest.TestCase):
     def test_asks_for_the_three_claim_structure(self):
-        for wanted in ("exactly two claims", "1. Summary", "2. Cause"):
+        for wanted in ("exactly two claims", "1. Summary", "2. Cause", "preempted"):
             self.assertIn(wanted, SYSTEM_PROMPT)
+        self.assertIn("nothing in this claim about whether the holder was running", SYSTEM_PROMPT)
         self.assertNotIn("Where to look", SYSTEM_PROMPT)
 
     def test_requires_names_inferred_holder_and_no_advice(self):
@@ -238,6 +239,13 @@ class EvidenceTest(TraceCase):
         for role, number in evidence.fields["event_lines"].items():
             self.assertEqual(evidence.lines[number], self.lines[number - 1], role)
 
+    def test_the_line_where_the_middle_became_ready_is_sent(self):
+        evidence = build_evidence(FIXTURE, self.trace, self.pattern)
+        number = evidence.fields["event_lines"]["middle_became_ready"]
+        self.assertEqual(number, 1184)
+        self.assertIn(":THREADY", evidence.lines[number])
+        self.assertIn("1184 | ", user_message(evidence))
+
     def test_multi_line_events_keep_their_continuation_lines(self):
         evidence = build_evidence(FIXTURE, self.trace, self.pattern)
         sync_line = self.worst.wait_call_line + 1
@@ -285,7 +293,7 @@ class ExplainerTest(TraceCase):
 
     def test_kevlint_writes_where_to_look_with_the_sync_p_lines(self):
         cited = self.worst.middle_line
-        got = self.explain(FakeClient(answer(("One.", [cited]), ("Two.", [cited]))))
+        got = self.explain(FakeClient(answer(("One.", [cited]), ("It preempted.", [cited]))))
         self.assertEqual(got.where.lines, [1173, 6176])
         for number in got.where.lines:
             self.assertIn(f"sync_p:{self.worst.sync_p}", self.lines[number - 1])
@@ -307,9 +315,17 @@ class ExplainerTest(TraceCase):
             self.assertIsNone(got.where)
             self.assertTrue(got.note.startswith(REJECTED_STRUCTURE), got.note)
 
+    def test_cause_claim_must_say_preempted(self):
+        cited = self.worst.middle_line
+        got = self.explain(FakeClient(answer(("One.", [cited]), ("The holder got ready.", [cited]))))
+        self.assertEqual(got.claims, [])
+        self.assertEqual(
+            got.note, f"{REJECTED_STRUCTURE} (the cause claim did not say the holder was preempted)"
+        )
+
     def test_invented_value_rejects_the_whole_explanation(self):
         cited = self.worst.middle_line
-        got = self.explain(FakeClient(answer(("Fine.", [cited]), ("It ran at priority 49.", [cited]))))
+        got = self.explain(FakeClient(answer(("Fine.", [cited]), ("It preempted at priority 49.", [cited]))))
         self.assertEqual(got.claims, [])
         self.assertIsNone(got.where)
         self.assertEqual(
@@ -323,7 +339,7 @@ class ExplainerTest(TraceCase):
             f"fusion_rt (priority 50) waited on {w.sync_p} for 249.094 ms, "
             "while priority 30 > 10 kept the inferred holder off the CPU."
         )
-        got = self.explain(FakeClient(answer((text, [w.block_start_line]), ("Cause.", [w.middle_line]))))
+        got = self.explain(FakeClient(answer((text, [w.block_start_line]), ("It preempted.", [w.middle_line]))))
         self.assertIsNone(got.note)
 
     def test_failure_becomes_a_note(self):
@@ -344,7 +360,7 @@ class ExplainerTest(TraceCase):
 
     def test_terminal_output_survives_an_ascii_stream(self):
         cited = self.worst.middle_line
-        client = FakeClient(answer(("Priority 10 → stayed.", [cited]), ("Cause.", [cited])))
+        client = FakeClient(answer(("Priority 10 → stayed.", [cited]), ("It preempted.", [cited])))
         explanations = Explainer(client).explain(FIXTURE, self.trace, self.result)
         out = io.TextIOWrapper(io.BytesIO(), encoding="ascii")
         print_explanations(self.trace, self.result, explanations, out)
