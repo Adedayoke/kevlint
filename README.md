@@ -30,6 +30,15 @@ PYTHONPATH=host python3 -m kevlint check-all ci/traces.txt --reports-dir reports
 
 `--summary <file>` appends a Markdown results table to a file.
 
+`--explain` adds an AI-generated explanation of each violation pattern to the
+terminal output and HTML report. It sends the worst occurrence's trace lines and
+structured fields to an OpenAI-compatible endpoint set by `KEVLINT_LLM_BASE_URL`,
+`KEVLINT_LLM_API_KEY` and `KEVLINT_LLM_MODEL`. Without them it prints one note
+and skips explanations. Every claim must cite trace lines, and an explanation
+citing a line that was not sent is rejected. That check proves a citation exists
+in the evidence, not that the claim is correct. Explanations never change the
+exit status.
+
 | Exit status | Meaning |
 |---|---|
 | 0 | No violations |

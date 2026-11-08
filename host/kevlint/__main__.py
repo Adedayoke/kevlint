@@ -9,10 +9,14 @@ import os
 import sys
 from pathlib import Path
 
+from .explain import Explainer, print_explanations
 from .inversion import HOLDER_NOTE, boost_text, check
+from .llm import LlmClient, load_config
 from .parser import TraceError, parse_trace
 from .report import render_html
 from .summary import Entry, append_summary
+
+EXPLAIN_HELP = "add AI-generated explanations of violations (never changes the exit status)"
 
 
 def resolved_line(trace, result):
@@ -84,7 +88,29 @@ def report(path, trace, result, out):
     )
 
 
-def check_trace(path, html_path):
+def make_explainer(enabled):
+    """Return an Explainer, or None if --explain is off or not configured."""
+    if not enabled:
+        return None
+    config, problem = load_config(os.environ)
+    if config is None:
+        print(f"kevlint: explanations skipped: {problem}")
+        return None
+    return Explainer(LlmClient(config))
+
+
+def explain_trace(explainer, path, trace, result):
+    """Print explanations and return them. Never raises: the verdict is already final."""
+    try:
+        explanations = explainer.explain(path, trace, result)
+        print_explanations(trace, result, explanations, sys.stdout)
+        return explanations
+    except Exception as error:
+        print(f"kevlint: explanations unavailable: internal error ({type(error).__name__})")
+        return None
+
+
+def check_trace(path, html_path, explainer=None):
     """Check one trace, print its result, and return an Entry."""
     try:
         trace = parse_trace(path)
@@ -94,10 +120,13 @@ def check_trace(path, html_path):
 
     result = check(trace)
     report(path, trace, result, sys.stdout)
+    explanations = None
+    if explainer is not None and result.violations:
+        explanations = explain_trace(explainer, path, trace, result)
     if html_path:
         try:
             with open(html_path, "w", encoding="utf-8") as out:
-                out.write(render_html(path, trace, result))
+                out.write(render_html(path, trace, result, explanations))
         except OSError as error:
             message = f"cannot write HTML report: {error}"
             print(f"kevlint: {message}", file=sys.stderr)
@@ -129,7 +158,7 @@ def read_trace_list(path):
         return [line for line in stripped if line and not line.startswith("#")]
 
 
-def check_all(list_path, reports_dir, summary_path):
+def check_all(list_path, reports_dir, summary_path, explainer=None):
     """Check every listed trace, never stopping early, and return the exit status."""
 
     def list_error(message):
@@ -157,7 +186,7 @@ def check_all(list_path, reports_dir, summary_path):
     for path, name in zip(paths, names):
         if entries:
             print()
-        entries.append(check_trace(path, str(Path(reports_dir) / f"{name}.html")))
+        entries.append(check_trace(path, str(Path(reports_dir) / f"{name}.html"), explainer))
     return finish(entries, summary_path)
 
 
@@ -168,15 +197,18 @@ def main(argv=None):
     check_command.add_argument("trace", help="output of traceprinter")
     check_command.add_argument("--html", metavar="FILE", help="also write an HTML report")
     check_command.add_argument("--summary", metavar="FILE", help="append a Markdown summary")
+    check_command.add_argument("--explain", action="store_true", help=EXPLAIN_HELP)
     all_command = commands.add_parser("check-all", help="check every trace in a list file")
     all_command.add_argument("list", help="file with one trace path per line")
     all_command.add_argument("--reports-dir", required=True, help="directory for HTML reports")
     all_command.add_argument("--summary", metavar="FILE", help="append a Markdown summary")
+    all_command.add_argument("--explain", action="store_true", help=EXPLAIN_HELP)
     args = parser.parse_args(argv)
 
+    explainer = make_explainer(args.explain)
     if args.command == "check-all":
-        return check_all(args.list, args.reports_dir, args.summary)
-    return finish([check_trace(args.trace, args.html)], args.summary)
+        return check_all(args.list, args.reports_dir, args.summary, explainer)
+    return finish([check_trace(args.trace, args.html, explainer)], args.summary)
 
 
 if __name__ == "__main__":
