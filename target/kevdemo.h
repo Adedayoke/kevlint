@@ -103,7 +103,10 @@ static inline void sleep_ms(unsigned ms)
     sleep_until_ns(now_ns() + (uint64_t)ms * 1000000u);
 }
 
-/* Each process ends itself with alarm(), so captures need no cleanup. */
+/* Each process ends itself with alarm(), so captures need no cleanup.
+ * TODO: clean up the MsgSend errors printed at shutdown, when one process's
+ * alarm expires before its peers'. They occur after the capture window.
+ */
 static inline void arm_duration(int argc, char **argv)
 {
     unsigned seconds = 10;
