@@ -12,6 +12,12 @@ from bisect import bisect_left
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 
+HOLDER_NOTE = "inferred, not named by the trace"
+TYPICAL_FIX = (
+    "Protect this resource with a mutex (QNX mutexes use priority inheritance) "
+    "instead of a semaphore."
+)
+
 RUNNING = "THRUNNING"
 READY = "THREADY"
 CALLS = {
@@ -39,6 +45,12 @@ class Violation:
     release_line: int
     middle_line: int
     block_end_line: int
+    middle_cycles: int
+    release_cycles: int
+
+    @property
+    def duration_cycles(self):
+        return self.end_cycles - self.start_cycles
 
 
 @dataclass
@@ -216,6 +228,8 @@ def _evaluate(block, runs, history, last_cycles):
         release_line=block.release.line,
         middle_line=run.event.line,
         block_end_line=block.end.line,
+        middle_cycles=run.event.cycles,
+        release_cycles=block.release.cycles,
     )
 
 

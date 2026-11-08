@@ -43,6 +43,7 @@ class Trace:
     first_cycles: int
     events: list
     thread_names: dict
+    header: dict = field(default_factory=dict)
 
     def seconds(self, cycles):
         """Seconds since the first event in the trace."""
@@ -91,4 +92,4 @@ def parse_trace(path):
         raise TraceError(
             f"{path}: no thread priorities found; capture with tracelogger -w"
         )
-    return Trace(int(header["TRACE_CYCLES_PER_SEC"]), first_cycles, events, names)
+    return Trace(int(header["TRACE_CYCLES_PER_SEC"]), first_cycles, events, names, header)
