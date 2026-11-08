@@ -24,6 +24,18 @@ class CliTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertIn("PASS", done.stdout)
 
+    def test_every_verdict_states_coverage(self):
+        for name in ("demo_normal", "demo_fixed", "demo_inversion"):
+            done = run("check", str(FIXTURES / f"{name}.txt"))
+            self.assertRegex(
+                done.stdout, r"blocks: \d+ total, \d+ evaluated, \d+ not evaluated"
+            )
+            self.assertRegex(
+                done.stdout,
+                r"(PASS|FAIL): \d+ violation\(s\) in \d+ evaluated block\(s\); "
+                r"\d+ block\(s\) not evaluated",
+            )
+
     def test_fixed_passes(self):
         done = run("check", str(FIXTURES / "demo_fixed.txt"))
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)

@@ -43,12 +43,23 @@ def report(path, trace, result, out):
             file=out,
         )
 
-    print(f"\n{total} violation(s), {result.evaluated} block(s) evaluated", file=out)
+    skipped = sum(result.not_evaluated.values())
+    print(f"\n{total} violation(s)", file=out)
+    print(
+        f"blocks: {result.evaluated + skipped} total, "
+        f"{result.evaluated} evaluated, {skipped} not evaluated",
+        file=out,
+    )
     for reason, count in sorted(result.not_evaluated.items()):
         print(f"  not evaluated: {count} ({reason})", file=out)
     if total:
         print(f"Note: every holder above is {HOLDER_NOTE}.", file=out)
-    print("FAIL" if total else "PASS", file=out)
+    verdict = "FAIL" if total else "PASS"
+    print(
+        f"{verdict}: {total} violation(s) in {result.evaluated} evaluated block(s); "
+        f"{skipped} block(s) not evaluated",
+        file=out,
+    )
 
 
 def main(argv=None):
