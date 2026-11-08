@@ -105,6 +105,23 @@ class ExplainedTest(unittest.TestCase):
         self.assertIn("AI-generated explanation", page)
 
 
+class DebugFlagTest(unittest.TestCase):
+    def run_with_seed_refused(self, *flags):
+        content, _ = good_answer()
+        with FakeLlm((400, {}, b"{}"), reply(content)) as fake:
+            return run("check", INVERSION, "--explain", *flags, base_url=fake.base_url)
+
+    def test_debug_reports_the_seed_retry_on_stderr(self):
+        done = self.run_with_seed_refused("--debug")
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("kevlint debug: HTTP 400 with seed set; retrying without seed", done.stderr)
+        self.assertIn("AI-GENERATED EXPLANATION", done.stdout)
+        self.assertNotIn(KEY, done.stdout + done.stderr)
+
+    def test_silent_without_debug(self):
+        self.assertEqual(self.run_with_seed_refused().stderr, "")
+
+
 class FailureNeverChangesTheVerdictTest(unittest.TestCase):
     def check_failure(self, step, wanted):
         plain = run("check", INVERSION)

@@ -5,11 +5,14 @@ API key cannot reach the terminal or a report through one.
 """
 import http.client
 import json
+import logging
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from urllib.parse import urlsplit
+
+_log = logging.getLogger(__name__)
 
 ENV_BASE_URL = "KEVLINT_LLM_BASE_URL"
 ENV_API_KEY = "KEVLINT_LLM_API_KEY"
@@ -144,6 +147,7 @@ class LlmClient:
                 error.close()
                 if status == 400 and "seed" in body:
                     del body["seed"]  # Not every endpoint accepts it.
+                    _log.debug("HTTP 400 with seed set; retrying without seed")
                     reason = "HTTP 400"
                     continue
                 reason = self._retryable_status(status, wait)

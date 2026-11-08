@@ -5,6 +5,7 @@ Exit status: 0 no violations, 1 violations found, 2 a trace, list or output
 file could not be used.
 """
 import argparse
+import logging
 import os
 import sys
 from pathlib import Path
@@ -17,6 +18,7 @@ from .report import render_html
 from .summary import Entry, append_summary
 
 EXPLAIN_HELP = "add AI-generated explanations of violations (never changes the exit status)"
+DEBUG_HELP = "print debug messages to stderr, such as a retry without the LLM seed"
 
 
 def resolved_line(trace, result):
@@ -198,13 +200,18 @@ def main(argv=None):
     check_command.add_argument("--html", metavar="FILE", help="also write an HTML report")
     check_command.add_argument("--summary", metavar="FILE", help="append a Markdown summary")
     check_command.add_argument("--explain", action="store_true", help=EXPLAIN_HELP)
+    check_command.add_argument("--debug", action="store_true", help=DEBUG_HELP)
     all_command = commands.add_parser("check-all", help="check every trace in a list file")
     all_command.add_argument("list", help="file with one trace path per line")
     all_command.add_argument("--reports-dir", required=True, help="directory for HTML reports")
     all_command.add_argument("--summary", metavar="FILE", help="append a Markdown summary")
     all_command.add_argument("--explain", action="store_true", help=EXPLAIN_HELP)
+    all_command.add_argument("--debug", action="store_true", help=DEBUG_HELP)
     args = parser.parse_args(argv)
 
+    if args.debug:
+        logging.basicConfig(stream=sys.stderr, format="kevlint debug: %(message)s")
+        logging.getLogger("kevlint").setLevel(logging.DEBUG)
     explainer = make_explainer(args.explain)
     if args.command == "check-all":
         return check_all(args.list, args.reports_dir, args.summary, explainer)

@@ -37,7 +37,8 @@ structured fields to an OpenAI-compatible endpoint set by `KEVLINT_LLM_BASE_URL`
 and skips explanations. Every claim must cite trace lines, and an explanation
 citing a line that was not sent is rejected. That check proves a citation exists
 in the evidence, not that the claim is correct. Explanations never change the
-exit status.
+exit status. `--debug` prints a message to stderr if the endpoint refused the
+seed and the request was retried without it.
 
 | Exit status | Meaning |
 |---|---|

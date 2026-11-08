@@ -67,10 +67,20 @@ class RequestTest(unittest.TestCase):
     def test_retries_once_without_seed_after_400(self):
         with FakeLlm((400, {}, b"{}"), reply("ok")) as fake:
             client, sleeps = client_for(fake)
-            self.assertEqual(client.complete("s", "u"), "ok")
+            with self.assertLogs("kevlint.llm", level="DEBUG") as logs:
+                self.assertEqual(client.complete("s", "u"), "ok")
         self.assertIn("seed", fake.requests[0][2])
         self.assertNotIn("seed", fake.requests[1][2])
         self.assertEqual(sleeps, [])
+        self.assertEqual(len(logs.output), 1)
+        self.assertIn("retrying without seed", logs.output[0])
+        self.assertNotIn(KEY, logs.output[0])
+
+    def test_no_seed_message_when_the_seed_is_accepted(self):
+        with FakeLlm(reply("ok")) as fake:
+            client, _ = client_for(fake)
+            with self.assertNoLogs("kevlint.llm", level="DEBUG"):
+                client.complete("s", "u")
 
     def test_second_400_is_a_failure(self):
         with FakeLlm((400, {}, b"{}")) as fake:
