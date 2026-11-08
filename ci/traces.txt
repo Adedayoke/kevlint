@@ -1,0 +1,3 @@
+# One trace per line, relative to the repo root. CI fails if any has violations.
+fixtures/demo_normal.txt
+fixtures/demo_fixed.txt

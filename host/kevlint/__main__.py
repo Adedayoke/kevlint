@@ -1,9 +1,13 @@
 """Command line: python -m kevlint check <trace.txt>
+                python -m kevlint check-all <list.txt> --reports-dir <dir>
 
-Exit status: 0 no violations, 1 violations found, 2 the trace could not be read.
+Exit status: 0 no violations, 1 violations found, 2 a trace, list or output
+file could not be used.
 """
 import argparse
+import os
 import sys
+from pathlib import Path
 
 from .inversion import HOLDER_NOTE, boost_text, check
 from .parser import TraceError, parse_trace
@@ -118,6 +122,45 @@ def finish(entries, summary_path):
     return status
 
 
+def read_trace_list(path):
+    """Return the traces in a list file, ignoring blank lines and # comments."""
+    with open(path, encoding="utf-8") as lines:
+        stripped = (line.strip() for line in lines)
+        return [line for line in stripped if line and not line.startswith("#")]
+
+
+def check_all(list_path, reports_dir, summary_path):
+    """Check every listed trace, never stopping early, and return the exit status."""
+
+    def list_error(message):
+        print(f"kevlint: {message}", file=sys.stderr)
+        return finish([Entry(list_path, error=message)], summary_path)
+
+    try:
+        paths = read_trace_list(list_path)
+    except OSError as error:
+        return list_error(f"cannot read trace list: {error}")
+    if not paths:
+        return list_error("the trace list is empty")
+
+    names = [Path(path).stem for path in paths]
+    repeated = sorted({name for name in names if names.count(name) > 1})
+    if repeated:
+        return list_error(f"two listed traces would share a report name: {', '.join(repeated)}")
+
+    try:
+        os.makedirs(reports_dir, exist_ok=True)
+    except OSError as error:
+        return list_error(f"cannot create reports directory: {error}")
+
+    entries = []
+    for path, name in zip(paths, names):
+        if entries:
+            print()
+        entries.append(check_trace(path, str(Path(reports_dir) / f"{name}.html")))
+    return finish(entries, summary_path)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="kevlint")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -125,8 +168,14 @@ def main(argv=None):
     check_command.add_argument("trace", help="output of traceprinter")
     check_command.add_argument("--html", metavar="FILE", help="also write an HTML report")
     check_command.add_argument("--summary", metavar="FILE", help="append a Markdown summary")
+    all_command = commands.add_parser("check-all", help="check every trace in a list file")
+    all_command.add_argument("list", help="file with one trace path per line")
+    all_command.add_argument("--reports-dir", required=True, help="directory for HTML reports")
+    all_command.add_argument("--summary", metavar="FILE", help="append a Markdown summary")
     args = parser.parse_args(argv)
 
+    if args.command == "check-all":
+        return check_all(args.list, args.reports_dir, args.summary)
     return finish([check_trace(args.trace, args.html)], args.summary)
 
 
