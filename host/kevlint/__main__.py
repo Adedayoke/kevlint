@@ -8,6 +8,7 @@ import sys
 from .inversion import HOLDER_NOTE, boost_text, check
 from .parser import TraceError, parse_trace
 from .report import render_html
+from .summary import Entry, append_summary
 
 
 def resolved_line(trace, result):
@@ -79,31 +80,54 @@ def report(path, trace, result, out):
     )
 
 
+def check_trace(path, html_path):
+    """Check one trace, print its result, and return an Entry."""
+    try:
+        trace = parse_trace(path)
+    except (OSError, TraceError) as error:
+        print(f"kevlint: {error}", file=sys.stderr)
+        return Entry(path, error=str(error))
+
+    result = check(trace)
+    report(path, trace, result, sys.stdout)
+    if html_path:
+        try:
+            with open(html_path, "w", encoding="utf-8") as out:
+                out.write(render_html(path, trace, result))
+        except OSError as error:
+            message = f"cannot write HTML report: {error}"
+            print(f"kevlint: {message}", file=sys.stderr)
+            return Entry(path, trace, result, error=message)
+        print(f"HTML report: {html_path}")
+    return Entry(path, trace, result)
+
+
+def finish(entries, summary_path):
+    """Write the optional summary and return the exit status."""
+    status = 0
+    if any(e.error is not None for e in entries):
+        status = 2
+    elif any(e.result.violations for e in entries):
+        status = 1
+    if summary_path:
+        try:
+            append_summary(entries, summary_path)
+        except OSError as error:
+            print(f"kevlint: cannot write summary: {error}", file=sys.stderr)
+            return 2
+    return status
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="kevlint")
     commands = parser.add_subparsers(dest="command", required=True)
     check_command = commands.add_parser("check", help="check a traceprinter text file")
     check_command.add_argument("trace", help="output of traceprinter")
     check_command.add_argument("--html", metavar="FILE", help="also write an HTML report")
+    check_command.add_argument("--summary", metavar="FILE", help="append a Markdown summary")
     args = parser.parse_args(argv)
 
-    try:
-        trace = parse_trace(args.trace)
-    except (OSError, TraceError) as error:
-        print(f"kevlint: {error}", file=sys.stderr)
-        return 2
-
-    result = check(trace)
-    report(args.trace, trace, result, sys.stdout)
-    if args.html:
-        try:
-            with open(args.html, "w", encoding="utf-8") as out:
-                out.write(render_html(args.trace, trace, result))
-        except OSError as error:
-            print(f"kevlint: cannot write HTML report: {error}", file=sys.stderr)
-            return 2
-        print(f"HTML report: {args.html}")
-    return 1 if result.violations else 0
+    return finish([check_trace(args.trace, args.html)], args.summary)
 
 
 if __name__ == "__main__":

@@ -482,14 +482,14 @@ def brief_ms(cycles, trace):
     return f"{value:.0f} ms" if value >= 1 else f"{value:.2f} ms"
 
 
-def plain_summary(pattern, trace):
+def plain_summary(pattern, trace, thread_text=thread_html):
     amount = brief_ms(pattern.worst.duration_cycles, trace)
     if len(pattern.occurrences) > 1:
         amount = f"up to {amount}"
     return (
-        f"The urgent thread {thread_html(trace, pattern.waiter)} waited {amount} for a lock "
-        f"held by {thread_html(trace, pattern.holder)}, which couldn’t finish because "
-        f"the less urgent {thread_html(trace, pattern.middle)} kept the CPU."
+        f"The urgent thread {thread_text(trace, pattern.waiter)} waited {amount} for a lock "
+        f"held by {thread_text(trace, pattern.holder)}, which couldn’t finish because "
+        f"the less urgent {thread_text(trace, pattern.middle)} kept the CPU."
     )
 
 

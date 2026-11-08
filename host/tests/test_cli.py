@@ -80,6 +80,26 @@ class CliTest(unittest.TestCase):
                 self.assertTrue(done.stdout.startswith(plain.stdout))
                 self.assertTrue(target.read_text(encoding="utf-8").startswith("<!doctype html>"))
 
+    def test_summary_option_writes_the_table(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "summary.md"
+            done = run("check", str(FIXTURES / "demo_inversion.txt"), "--summary", str(target))
+            self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+            self.assertIn("| Trace | Result |", target.read_text(encoding="utf-8"))
+
+    def test_summary_records_an_unreadable_trace(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "summary.md"
+            done = run("check", str(FIXTURES / "does_not_exist.txt"), "--summary", str(target))
+            self.assertEqual(done.returncode, 2)
+            self.assertIn("ERROR", target.read_text(encoding="utf-8"))
+
+    def test_unwritable_summary_path_is_exit_2(self):
+        target = FIXTURES / "no_such_directory" / "summary.md"
+        done = run("check", str(FIXTURES / "demo_normal.txt"), "--summary", str(target))
+        self.assertEqual(done.returncode, 2)
+        self.assertIn("cannot write summary", done.stderr)
+
     def test_unwritable_html_path_is_exit_2(self):
         target = FIXTURES / "no_such_directory" / "report.html"
         done = run("check", str(FIXTURES / "demo_normal.txt"), "--html", str(target))
