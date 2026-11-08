@@ -1,7 +1,8 @@
 """Priority-inversion rule.
 
 A block is a thread in THSEM or THMUTEX. It is a violation when a thread with
-priority strictly between the waiter's and the holder's ran during the block.
+priority strictly between the waiter's and the holder's ran during the block,
+on the CPU where the holder last ran, while the holder was in THREADY.
 
 The trace never names a holder. It is inferred as the thread whose post or
 unlock on the same sync object in the same process released the waiter, so a
@@ -12,6 +13,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 
 RUNNING = "THRUNNING"
+READY = "THREADY"
 CALLS = {
     "THSEM": ("SYNC_SEM_WAIT/85", "SYNC_SEM_POST/84"),
     "THMUTEX": ("SYNC_MUTEX_LOCK/80", "SYNC_MUTEX_UNLOCK/81"),
@@ -66,6 +68,7 @@ class _Run:
     thread: tuple
     priority: int
     end_cycles: int = None
+    end_index: int = None
 
 
 def _scan(trace):
@@ -100,12 +103,13 @@ def _scan(trace):
 
         thread = event.thread
         if event.priority is not None:
-            history[thread].append((index, event.priority))
+            history[thread].append((index, event.priority, event.name, event.cpu))
         if event.name == RUNNING:
             running[event.cpu] = thread
             previous = last_run_on_cpu.get(event.cpu)
             if previous is not None:
                 previous.end_cycles = event.cycles
+                previous.end_index = index
             run = _Run(index, event, thread, event.priority)
             runs.append(run)
             last_run_on_cpu[event.cpu] = run
@@ -137,34 +141,63 @@ def _holder_priority(history, block, index):
     return entries[position - 1][1] if position > 0 else None
 
 
-def _evaluate(block, runs, history, last_cycles):
-    """Return the Violation for one evaluable block, or None."""
-    waiter_priority = block.start.priority
-    # Evidence names the thread that took the most time on the holder's CPU.
-    time_on_holder_cpu = Counter()
-    time_total = Counter()
-    first_run = {}
-    lowest_holder = {}
+def _delays_holder(history, block, run):
+    """True if run was on the holder's last CPU while the holder was in THREADY.
 
+    The holder's state comes from its latest THREAD event. The THREADY event
+    can be logged just after the preempting THRUNNING, so the holder's next
+    event also counts if it falls inside this run.
+    """
+    entries = history.get(block.holder, [])
+    position = bisect_left(entries, (run.index, -1))
+    holder_cpu = next(
+        (e[3] for e in reversed(entries[:position]) if e[2] == RUNNING), None
+    )
+    if holder_cpu != run.event.cpu:
+        return False
+    if position > 0 and entries[position - 1][2] == READY:
+        return True
+    stop = block.end_index if run.end_index is None else min(run.end_index, block.end_index)
+    return (
+        position < len(entries)
+        and entries[position][0] < stop
+        and entries[position][2] == READY
+    )
+
+
+def _qualifying_runs(block, runs, history):
+    """Yield (run, holder priority) for each run that makes the block a violation."""
     for run in runs:
         if not block.index < run.index < block.end_index:
             continue
         if run.thread in (block.waiter, block.holder):
             continue
         holder_priority = _holder_priority(history, block, run.index)
-        if holder_priority is None or not holder_priority < run.priority < waiter_priority:
+        if holder_priority is None:
             continue
+        if not holder_priority < run.priority < block.start.priority:
+            continue
+        if _delays_holder(history, block, run):
+            yield run, holder_priority
+
+
+def _evaluate(block, runs, history, last_cycles):
+    """Return the Violation for one evaluable block, or None."""
+    waiter_priority = block.start.priority
+    # Evidence names the qualifying thread that ran longest during the block.
+    time_total = Counter()
+    first_run = {}
+    lowest_holder = {}
+
+    for run, holder_priority in _qualifying_runs(block, runs, history):
         end = min(run.end_cycles or last_cycles, block.end.cycles)
-        duration = max(end - run.event.cycles, 0)
-        time_total[run.thread] += duration
-        if run.event.cpu == block.release.cpu:
-            time_on_holder_cpu[run.thread] += duration
+        time_total[run.thread] += max(end - run.event.cycles, 0)
         first_run.setdefault(run.thread, run)
         lowest_holder.setdefault(run.thread, holder_priority)
 
     if not first_run:
         return None
-    middle = max(first_run, key=lambda t: (time_on_holder_cpu[t], time_total[t]))
+    middle = max(first_run, key=lambda t: time_total[t])
     run = first_run[middle]
     return Violation(
         kind=block.kind,

@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from kevlint.inversion import check
+from kevlint.inversion import _qualifying_runs, _scan, check
 from kevlint.parser import parse_trace
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
@@ -70,6 +70,55 @@ class InversionTraceTest(unittest.TestCase):
             self.assertIn(":THREADY", self.lines[v.block_end_line - 1])
             self.assertLess(v.block_start_line, v.middle_line)
             self.assertLess(v.middle_line, v.block_end_line)
+
+
+class MiddleMustDelayHolderTest(unittest.TestCase):
+    """A middle thread counts only on the holder's CPU, with the holder in THREADY."""
+
+    def setUp(self):
+        self.trace = parse_trace(FIXTURES / "demo_inversion.txt")
+
+    def thread(self, name):
+        return next(t for t, n in self.trace.thread_names.items() if n == name)
+
+    def middles(self):
+        return {self.trace.thread_names[v.middle] for v in check(self.trace).violations}
+
+    def test_thread_on_another_cpu_is_not_counted(self):
+        blocks, runs, history = _scan(self.trace)
+        rt = self.thread("fusion_rt")
+        blocks = [b for b in blocks if b.waiter == rt and b.end and b.release]
+        pipeline = {self.thread("sensor_b"), self.thread("fusion_server")}
+        in_priority_window = [
+            r
+            for b in blocks
+            for r in runs
+            if b.index < r.index < b.end_index
+            and r.thread in pipeline
+            and r.event.cpu == 1
+            and 10 < r.priority < 50
+        ]
+        self.assertTrue(in_priority_window, "fixture should have such runs")
+        counted = {r.thread for b in blocks for r, _ in _qualifying_runs(b, runs, history)}
+        self.assertFalse(counted & pipeline)
+
+    def test_middle_moved_to_another_cpu_stops_counting(self):
+        hog = self.thread("fusion_hog")
+        self.assertIn("fusion_hog", self.middles())
+        for event in self.trace.events:
+            if event.cls == "THREAD" and event.name == "THRUNNING" and event.thread == hog:
+                event.cpu = 1
+        self.assertNotIn("fusion_hog", self.middles())
+
+    def test_holder_not_in_thready_stops_counting(self):
+        holder = self.thread("fusion_holder")
+        self.assertIn("fusion_hog", self.middles())
+        self.trace.events = [
+            e
+            for e in self.trace.events
+            if not (e.cls == "THREAD" and e.name == "THREADY" and e.thread == holder)
+        ]
+        self.assertNotIn("fusion_hog", self.middles())
 
 
 if __name__ == "__main__":
