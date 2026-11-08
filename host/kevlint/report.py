@@ -34,9 +34,9 @@ CSS = """
   --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e;
   --muted: #6f6d67; --grid: #e1e0d9; --axis: #c3c2b7;
   --border: rgba(11,11,11,.10); --code: #f0efec;
-  --running: #2a78d6; --ready: #eb6834; --blocked: #1baf7a;
-  --ready-ink: #b5461b; --blocked-ink: #0e7a54;
-  --good: #0ca30c; --critical: #d03b3b;
+  --running: #2a78d6; --ready: #eda100; --blocked: #c22f2f;
+  --ready-ink: #a96f00; --blocked-ink: #8d1f1f;
+  --good: #0ca30c; --critical: #d03b3b; --warning: #fab219;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
@@ -46,8 +46,8 @@ CSS = """
     --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7;
     --muted: #a3a198; --grid: #2c2c2a; --axis: #383835;
     --border: rgba(255,255,255,.10); --code: #2c2c2a;
-    --running: #3987e5; --ready: #d95926; --blocked: #199e70;
-    --ready-ink: #8f3512; --blocked-ink: #0d6246;
+    --running: #3987e5; --ready: #e0a412; --blocked: #c83636;
+    --ready-ink: #9a6e00; --blocked-ink: #8a2222;
   }
 }
 * { box-sizing: border-box; }
