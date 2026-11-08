@@ -36,7 +36,10 @@ structured fields to an OpenAI-compatible endpoint set by `KEVLINT_LLM_BASE_URL`
 `KEVLINT_LLM_API_KEY` and `KEVLINT_LLM_MODEL`. Without them it prints one note
 and skips explanations. Every claim must cite trace lines, and an explanation
 citing a line that was not sent is rejected. That check proves a citation exists
-in the evidence, not that the claim is correct. Explanations never change the
+in the evidence, not that the claim is correct. Hex values, priorities and
+durations stated in a claim must also appear in its cited lines or the fields
+sent, or the explanation is rejected. The "where to look" line is written by
+kevlint, not the model. Explanations never change the
 exit status. `--debug` prints a message to stderr if the endpoint refused the
 seed and the request was retried without it.
 

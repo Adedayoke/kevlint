@@ -34,6 +34,13 @@ class ExplanationHtmlTest(unittest.TestCase):
         self.assertIn("Holder preempted.", page)
         self.assertIn("lines 1187, 1188", page)
 
+    def test_kevlint_where_line_is_labeled_as_not_ai(self):
+        where = Claim("waiter a <x> blocked.", [1173, 6176])
+        page = self.render(Explanation(1, claims=[Claim("c", [1])], where=where))
+        self.assertIn("written by kevlint from the trace, not AI", page)
+        self.assertIn("waiter a &lt;x&gt; blocked.", page)
+        self.assertIn("lines 1173, 6176", page)
+
     def test_model_text_is_escaped(self):
         page = self.render(Explanation(1, claims=[Claim("<img src=x>", [1])]))
         self.assertIn("&lt;img src=x&gt;", page)

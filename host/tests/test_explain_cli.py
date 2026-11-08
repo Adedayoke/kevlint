@@ -34,8 +34,11 @@ def run(*args, base_url=None):
 
 def good_answer():
     worst = group_patterns(check(parse_trace(INVERSION)).violations)[0].worst
-    claim = {"text": "fusion_hog <b>ran</b> first.", "lines": [worst.middle_line]}
-    return json.dumps({"claims": [claim]}), worst.middle_line
+    claims = [
+        {"text": "fusion_hog <b>ran</b> first.", "lines": [worst.middle_line]},
+        {"text": "The waiter stayed blocked.", "lines": [worst.block_start_line]},
+    ]
+    return json.dumps({"claims": claims}), worst.middle_line
 
 
 class NotConfiguredTest(unittest.TestCase):
@@ -77,6 +80,11 @@ class ExplainedTest(unittest.TestCase):
         self.assertIn("AI-generated explanation", page)
         self.assertIn(f"line {line}", page)
         self.assertIn("&lt;b&gt;ran&lt;/b&gt;", page)
+        label = "Where to look (written by kevlint from the trace, not AI)"
+        self.assertIn(label, done.stdout)
+        self.assertIn("[lines 1173, 6176]", done.stdout)
+        self.assertIn(label, page)
+        self.assertIn("lines 1173, 6176", page)
         self.assertNotIn("<b>ran</b>", page)
         for text in (done.stdout, done.stderr, page):
             self.assertNotIn(KEY, text)
@@ -144,6 +152,20 @@ class FailureNeverChangesTheVerdictTest(unittest.TestCase):
         self.assertNotIn("Invented claim.", done.stdout)
         self.assertNotIn("Invented claim.", page)
         self.assertIn("AI-GENERATED EXPLANATION", done.stdout)
+
+    def test_invented_value_is_rejected_with_its_reason(self):
+        worst = group_patterns(check(parse_trace(INVERSION)).violations)[0].worst
+        claims = [
+            {"text": "Blocked on 0xdeadbeef.", "lines": [worst.block_start_line]},
+            {"text": "Cause.", "lines": [worst.middle_line]},
+        ]
+        done, page = self.check_failure(
+            reply(json.dumps({"claims": claims})),
+            "explanation rejected: unverifiable value "
+            "(hex value 0xdeadbeef is not in the cited lines or fields)",
+        )
+        self.assertNotIn("Where to look", done.stdout)
+        self.assertNotIn("Blocked on 0xdeadbeef.", page)
 
     def test_rate_limit(self):
         self.check_failure(

@@ -7,7 +7,7 @@ script only adds richer tooltips over the SVG <title> fallback.
 import html
 import math
 
-from .explain import CHECK_NOTE, line_list, pattern_key
+from .explain import CHECK_NOTE, WHERE_LABEL, line_list, pattern_key
 from .inversion import HOLDER_NOTE, TYPICAL_FIXES, boost_text
 from .patterns import group_patterns
 from .timeline import BLOCKED, READY, RUNNING, thread_segments
@@ -39,6 +39,8 @@ EXPLANATION_CSS = """
 .ai-label small { font-weight: 400; color: var(--muted); margin-left: 6px; }
 .ai-check, .ai-note { color: var(--ink-2); margin: 4px 0 0; }
 .ai ul { margin: 6px 0 0; padding-left: 20px; }
+.ai-where { margin: 8px 0 0; padding-top: 8px; border-top: 1px solid var(--border); }
+.ai-where strong { display: block; }
 .ai-lines { font-family: var(--mono); font-size: .9em; color: var(--muted); white-space: nowrap; }
 """
 
@@ -524,6 +526,12 @@ def explanation_html(explanation):
             for claim in explanation.claims
         )
         content = f'<p class="ai-check">{esc(CHECK_NOTE)}</p><ul>{items}</ul>'
+        if explanation.where is not None:
+            where = explanation.where
+            content += (
+                f'<p class="ai-where"><strong>{esc(WHERE_LABEL)}</strong>{esc(where.text)} '
+                f'<span class="ai-lines">{esc(line_list(where.lines))}</span></p>'
+            )
     return (
         '<div class="ai"><div class="ai-label">AI-generated explanation'
         f"<small>worst of {plural(explanation.occurrences, 'occurrence')}</small></div>"
