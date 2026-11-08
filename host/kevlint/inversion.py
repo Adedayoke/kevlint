@@ -13,6 +13,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 HOLDER_NOTE = "inferred, not named by the trace"
+BELOW_MINIMUM = "waiter below the configured minimum priority"
 TYPICAL_FIXES = {
     "THSEM": (
         "Protect this resource with a mutex (QNX mutexes use priority inheritance) "
@@ -402,7 +403,8 @@ def _higher(current, priority):
     return priority if current is None else max(current, priority)
 
 
-def check(trace):
+def check(trace, min_waiter_priority=None):
+    """Run the rule. Waiters below min_waiter_priority are counted as not evaluated."""
     blocks, runs, history = _scan(trace)
     violations = []
     evaluated = 0
@@ -412,6 +414,12 @@ def check(trace):
     resolved = []
 
     for block in blocks:
+        priority = block.start.priority
+        if min_waiter_priority is not None and priority is not None and priority < min_waiter_priority:
+            # Deliberately out of scope, so it never feeds the coverage warning.
+            not_evaluated[BELOW_MINIMUM] += 1
+            continue
+
         reason = None
         if block.wait_call is None:
             reason = "no matching wait call in the trace"

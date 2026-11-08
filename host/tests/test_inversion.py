@@ -19,6 +19,32 @@ class NormalTraceTest(unittest.TestCase):
         self.assertEqual(result.violations, [])
 
 
+class MinimumWaiterPriorityTest(unittest.TestCase):
+    def setUp(self):
+        self.trace = parse_trace(FIXTURES / "demo_inversion.txt")
+
+    def test_no_minimum_is_the_existing_behavior(self):
+        self.assertEqual(check(self.trace, None), check(self.trace))
+
+    def test_minimum_below_the_waiter_keeps_every_violation(self):
+        self.assertEqual(len(check(self.trace, 50).violations), 10)
+
+    def test_minimum_above_the_waiter_drops_them_and_reports_why(self):
+        result = check(self.trace, 51)
+        self.assertEqual(result.violations, [])
+        self.assertEqual(result.evaluated, 0)
+        self.assertGreater(result.not_evaluated["waiter below the configured minimum priority"], 0)
+        self.assertIsNone(result.not_evaluated_max_priority)
+
+    def test_every_block_is_still_counted(self):
+        plain = check(self.trace)
+        filtered = check(self.trace, 40)
+        self.assertEqual(
+            plain.evaluated + sum(plain.not_evaluated.values()),
+            filtered.evaluated + sum(filtered.not_evaluated.values()),
+        )
+
+
 class HolderEvidenceLinesTest(unittest.TestCase):
     def test_first_violation_records_the_holder_lines(self):
         _, result, lines = load("demo_inversion")
