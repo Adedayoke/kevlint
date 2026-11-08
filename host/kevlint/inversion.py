@@ -10,7 +10,7 @@ block with no visible release cannot be evaluated and is counted separately.
 """
 from bisect import bisect_left
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 HOLDER_NOTE = "inferred, not named by the trace"
 TYPICAL_FIXES = {
@@ -57,12 +57,52 @@ class Violation:
 
 
 @dataclass
+class ResolvedWait:
+    """An evaluated block with no violation, where the waiter outranked the holder."""
+
+    kind: str
+    sync_p: str
+    waiter: tuple
+    waiter_priority: int
+    holder: tuple
+    holder_base_priority: int
+    holder_peak_priority: int
+    release_call: str
+    middle: tuple
+    middle_priority: int
+    middle_ran: bool
+    start_cycles: int
+    end_cycles: int
+    wait_call_line: int
+    block_start_line: int
+    release_line: int
+    middle_line: int
+    block_end_line: int
+    middle_cycles: int
+    release_cycles: int
+
+    @property
+    def duration_cycles(self):
+        return self.end_cycles - self.start_cycles
+
+
+def boost_text(resolved, arrow="→"):
+    """Describe what happened to the holder's priority during the wait."""
+    base, peak = resolved.holder_base_priority, resolved.holder_peak_priority
+    if peak <= base:
+        return f"stayed at priority {base} (no boost seen)"
+    text = f"boosted {base} {arrow} {peak}"
+    return f"{text} (priority inheritance)" if resolved.kind == "THMUTEX" else text
+
+
+@dataclass
 class Result:
     violations: list
     evaluated: int
     not_evaluated: Counter
     evaluated_max_priority: int = None
     not_evaluated_max_priority: int = None
+    resolved: list = field(default_factory=list)
 
     @property
     def unevaluated_outranks_evaluated(self):
@@ -78,6 +118,7 @@ class _Block:
     index: int
     start: object
     wait_call: object
+    wait_index: int = None
     end_index: int = None
     end: object = None
     holder: tuple = None
@@ -98,6 +139,7 @@ def _scan(trace):
     """Collect blocks, runs and each thread's priority history in one pass."""
     running = {}
     last_call = {}
+    last_call_index = {}
     open_blocks = {}
     blocks = []
     runs = []
@@ -110,6 +152,7 @@ def _scan(trace):
             if thread is None:
                 continue
             last_call[thread] = event
+            last_call_index[thread] = index
             kind = RELEASE_KIND.get(event.name)
             if kind is None:
                 continue
@@ -144,7 +187,14 @@ def _scan(trace):
         elif block is None and event.name in CALLS:
             call = last_call.get(thread)
             matches = call is not None and call.name == CALLS[event.name][0]
-            block = _Block(thread, event.name, index, event, call if matches else None)
+            block = _Block(
+                thread,
+                event.name,
+                index,
+                event,
+                call if matches else None,
+                last_call_index.get(thread) if matches else None,
+            )
             open_blocks[thread] = block
             blocks.append(block)
 
@@ -244,6 +294,93 @@ def _evaluate(block, runs, history, last_cycles):
     )
 
 
+def _would_be_middle(block, history, trace, base):
+    """Find the thread that spent longest in THREADY, outranking the holder's base.
+
+    Only threads in the waiter-to-base priority window whose last CPU is the
+    holder's count. Returns (thread, first THREADY entry, ran after that) or None.
+    """
+    best = None
+    best_ready = 0
+    for thread, entries in history.items():
+        if thread in (block.waiter, block.holder):
+            continue
+        start = bisect_left(entries, (block.index, -1))
+        ready = 0
+        first = None
+        for position in range(max(start - 1, 0), len(entries)):
+            index, priority, state, _ = entries[position]
+            if index >= block.end_index:
+                break
+            if state != READY or not base < priority < block.start.priority:
+                continue
+            begin = max(trace.events[index].cycles, block.start.cycles)
+            end = block.end.cycles
+            if position + 1 < len(entries):
+                end = min(trace.events[entries[position + 1][0]].cycles, end)
+            if end > begin:
+                ready += end - begin
+                first = first or entries[position]
+        if first is None or ready <= best_ready:
+            continue
+        earlier = bisect_left(entries, (first[0], -1))
+        cpu = next((e[3] for e in reversed(entries[:earlier]) if e[2] == RUNNING), first[3])
+        if cpu != block.release.cpu:
+            continue
+        ran = any(e[2] == RUNNING and first[0] < e[0] < block.end_index for e in entries)
+        best, best_ready = (thread, first, ran), ready
+    return best
+
+
+def _resolved_wait(block, history, trace):
+    """Describe a non-violating block whose waiter outranked the holder, else None.
+
+    The holder's base is its priority before the waiter's wait call, because
+    a boost is logged after that call but before the waiter's block starts.
+    """
+    entries = history.get(block.holder, [])
+    position = bisect_left(entries, (block.wait_index, -1))
+    if position == 0 or block.start.priority is None:
+        return None
+    base = entries[position - 1][1]
+    if base >= block.start.priority:
+        return None
+    peak = max([e[1] for e in entries[position:] if e[0] < block.end_index], default=base)
+    peak = max(peak, base)
+
+    middle, middle_priority, ran, middle_line, middle_cycles = None, None, False, None, None
+    found = _would_be_middle(block, history, trace, base)
+    if found is not None:
+        middle, first, ran = found
+        middle_priority = first[1]
+        event = trace.events[first[0]]
+        middle_line = event.line
+        middle_cycles = max(event.cycles, block.start.cycles)
+
+    return ResolvedWait(
+        kind=block.kind,
+        sync_p=block.wait_call.fields["sync_p"],
+        waiter=block.waiter,
+        waiter_priority=block.start.priority,
+        holder=block.holder,
+        holder_base_priority=base,
+        holder_peak_priority=peak,
+        release_call=block.release.name,
+        middle=middle,
+        middle_priority=middle_priority,
+        middle_ran=ran,
+        start_cycles=block.start.cycles,
+        end_cycles=block.end.cycles,
+        wait_call_line=block.wait_call.line,
+        block_start_line=block.start.line,
+        release_line=block.release.line,
+        middle_line=middle_line,
+        block_end_line=block.end.line,
+        middle_cycles=middle_cycles,
+        release_cycles=block.release.cycles,
+    )
+
+
 def _higher(current, priority):
     if priority is None:
         return current
@@ -258,6 +395,7 @@ def check(trace):
     not_evaluated = Counter()
     evaluated_max = None
     not_evaluated_max = None
+    resolved = []
 
     for block in blocks:
         reason = None
@@ -277,5 +415,11 @@ def check(trace):
         violation = _evaluate(block, runs, history, last_cycles)
         if violation is not None:
             violations.append(violation)
+            continue
+        wait = _resolved_wait(block, history, trace)
+        if wait is not None:
+            resolved.append(wait)
 
-    return Result(violations, evaluated, not_evaluated, evaluated_max, not_evaluated_max)
+    return Result(
+        violations, evaluated, not_evaluated, evaluated_max, not_evaluated_max, resolved
+    )

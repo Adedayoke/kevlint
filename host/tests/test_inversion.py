@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from kevlint.inversion import _qualifying_runs, _scan, check
+from kevlint.inversion import _qualifying_runs, _scan, boost_text, check
 from kevlint.parser import parse_trace
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
@@ -70,6 +70,53 @@ class InversionTraceTest(unittest.TestCase):
             self.assertIn(":THREADY", self.lines[v.block_end_line - 1])
             self.assertLess(v.block_start_line, v.middle_line)
             self.assertLess(v.middle_line, v.block_end_line)
+
+
+class ResolvedWaitTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.trace, cls.result, cls.lines = load("demo_fixed")
+        cls.worst = max(cls.result.resolved, key=lambda r: r.duration_cycles)
+
+    def name(self, thread):
+        return self.trace.thread_names[thread]
+
+    def test_every_contended_mutex_block_is_listed(self):
+        self.assertEqual(len(self.result.resolved), 11)
+
+    def test_worst_wait(self):
+        self.assertEqual(self.name(self.worst.waiter), "fusion_rt")
+        self.assertEqual(self.name(self.worst.holder), "fusion_holder")
+        seconds = self.worst.duration_cycles / self.trace.cycles_per_sec
+        self.assertAlmostEqual(seconds, 0.02428, places=4)
+
+    def test_base_priority_comes_from_before_the_boost(self):
+        for wait in self.result.resolved:
+            self.assertEqual(wait.holder_base_priority, 10)
+            self.assertEqual(wait.holder_peak_priority, 50)
+
+    def test_middle_stayed_ready(self):
+        for wait in self.result.resolved:
+            self.assertEqual(self.name(wait.middle), "fusion_hog")
+            self.assertEqual(wait.middle_priority, 30)
+            self.assertFalse(wait.middle_ran)
+
+    def test_evidence_lines_point_at_the_right_events(self):
+        for wait in self.result.resolved:
+            self.assertIn(":SYNC_MUTEX_LOCK/80", self.lines[wait.wait_call_line - 1])
+            self.assertIn(":THMUTEX", self.lines[wait.block_start_line - 1])
+            self.assertIn(":THREADY", self.lines[wait.middle_line - 1])
+            self.assertIn(":SYNC_MUTEX_UNLOCK/81", self.lines[wait.release_line - 1])
+
+    def test_boost_wording(self):
+        self.assertEqual(boost_text(self.worst), "boosted 10 → 50 (priority inheritance)")
+        self.assertEqual(
+            boost_text(self.worst, arrow="->"), "boosted 10 -> 50 (priority inheritance)"
+        )
+
+    def test_no_resolved_waits_elsewhere(self):
+        for name in ("demo_normal", "demo_inversion"):
+            self.assertEqual(load(name)[1].resolved, [])
 
 
 class MiddleMustDelayHolderTest(unittest.TestCase):
