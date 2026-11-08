@@ -40,12 +40,24 @@ class Finding:
 
 
 @dataclass
+class BlockBar:
+    """One evaluated block under a budget, for the chart."""
+
+    millis: float
+    breach: bool
+    still_open: bool
+    start_cycles: int
+    start_line: int
+
+
+@dataclass
 class BudgetResult:
     budget: object
     status: str
     evaluated: int = 0
     breaches: int = 0
     worst_ms: float = None
+    blocks: list = field(default_factory=list)
 
 
 @dataclass
@@ -238,6 +250,9 @@ def _check_budget(trace, budget, threads, waits, blocks, rule):
             continue
         row.evaluated += 1
         row.worst_ms = millis if row.worst_ms is None else max(row.worst_ms, millis)
+        row.blocks.append(
+            BlockBar(millis, millis > budget.max_ms, wait.end is None, wait.start.cycles, wait.start.line)
+        )
         if millis > budget.max_ms:
             row.breaches += 1
             rule.findings.append(_finding(trace, wait, blocks, budget.max_ms))

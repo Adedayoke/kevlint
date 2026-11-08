@@ -58,6 +58,13 @@ class MaxBlockedTimeTest(unittest.TestCase):
         self.assertEqual(rule.evaluated, 11)
         self.assertAlmostEqual(rule.worst_ms, 249.094, places=2)
 
+    def test_budget_records_one_bar_per_evaluated_block(self):
+        row = rule_for("demo_inversion", RT).budgets[0]
+        self.assertEqual(len(row.blocks), 11)
+        self.assertTrue(all(block.breach for block in row.blocks))
+        self.assertEqual([block.still_open for block in row.blocks], [False] * 10 + [True])
+        self.assertEqual(row.blocks[0].start_line, 1177)
+
     def test_block_open_at_trace_end_within_budget_is_not_evaluated(self):
         rule = rule_for("demo_inversion", Budget("fusion_rt", 60))
         self.assertEqual(len(rule.findings), 10)

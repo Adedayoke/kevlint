@@ -80,6 +80,12 @@ a.rule-link { color: inherit; font-family: var(--mono); }
 .meter-key i { display: block; width: 12px; height: 8px; border-radius: 2px; }
 .meter-key i.done { background: var(--ink-2); }
 .stat.excluded b, .stat.excluded span, .reasons li.excluded, .reasons li.excluded b { color: var(--muted); }
+.barchart .bar-ok { fill: var(--muted); }
+.barchart .bar-over { fill: var(--critical); }
+.barchart .bar-open, .legend .bar-open { fill: var(--surface); stroke: var(--critical); stroke-width: 2; }
+.legend .bar-ok { fill: var(--muted); }
+.legend .bar-over { fill: var(--critical); }
+.budget-line { stroke: var(--ink); stroke-width: 2; stroke-dasharray: 6 4; }
 .causes { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
 .causes strong { display: block; font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
 .cause-links { color: var(--ink-2); font-size: 13px; }
@@ -801,6 +807,12 @@ def footer_html(path, trace):
 
 
 VISIBLE_ROWS = 3
+CHART_HEIGHT = 260
+CHART_LEFT = 56
+CHART_RIGHT = 112
+CHART_TOP = 24
+CHART_BOTTOM = 44
+CHART_ALL_LABELS = 30
 STATUS_CLASS = {PASS: "pass", FAIL: "fail", ERROR: "fail", NOT_EVALUATED: "warn"}
 STATUS_ICON = {PASS: "✓", FAIL: "✕", ERROR: "✕", NOT_EVALUATED: "!"}
 VISIBILITY_NOTE = (
@@ -986,6 +998,148 @@ def semaphore_table(rule, trace):
     return worst_rows(head, rows, [f.duration_cycles for f in rule.findings], "findings")
 
 
+def bar_path(x, top, width, base):
+    """A column with a 4px rounded data end and a square baseline."""
+    radius = min(4, width / 2, base - top)
+    return (
+        f"M{x:.1f},{base} V{top + radius:.1f} Q{x:.1f},{top:.1f} {x + radius:.1f},{top:.1f} "
+        f"H{x + width - radius:.1f} Q{x + width:.1f},{top:.1f} {x + width:.1f},{top + radius:.1f} "
+        f"V{base} Z"
+    )
+
+
+def bar_class(block):
+    if block.still_open:
+        return "bar-open"
+    return "bar-over" if block.breach else "bar-ok"
+
+
+def bar_tooltip(number, block, budget, trace):
+    amount = f"at least {block.millis:.3f}" if block.still_open else f"{block.millis:.3f}"
+    verdict = f"over by {block.millis - budget:.3f} ms" if block.breach else "within budget"
+    lines = [f"Block {number}: {amount} ms", f"budget {budget:g} ms, {verdict}"]
+    if block.still_open:
+        lines.append("still open when the trace ended")
+    lines.append(f"start {trace.seconds(block.start_cycles):.6f} s, line {block.start_line}")
+    return "\n".join(lines)
+
+
+def x_label_step(count):
+    return 1 if count <= CHART_ALL_LABELS else max(count // 10, 1)
+
+
+def blocks_svg(row, trace):
+    blocks, budget = row.blocks, row.budget.max_ms
+    peak = max(max(block.millis for block in blocks), budget)
+    step = nice_step(peak)
+    ceiling = math.ceil(peak / step) * step
+    base = CHART_HEIGHT - CHART_BOTTOM
+    height = base - CHART_TOP
+    plot_right = WIDTH - CHART_RIGHT
+    slot = (plot_right - CHART_LEFT) / len(blocks)
+    width = min(24, max(slot - 2, 1))
+    y = lambda value: base - value / ceiling * height
+
+    parts = []
+    for tick in range(int(round(ceiling / step)) + 1):
+        value = tick * step
+        parts.append(
+            f'<line class="grid" x1="{CHART_LEFT}" x2="{plot_right}" y1="{y(value):.1f}" y2="{y(value):.1f}"/>'
+            f'<text class="tick" x="{CHART_LEFT - 8}" y="{y(value) + 4:.1f}" text-anchor="end">{value:g}</text>'
+        )
+
+    worst = max(range(len(blocks)), key=lambda i: blocks[i].millis)
+    labels = x_label_step(len(blocks))
+    for index, block in enumerate(blocks):
+        number = index + 1
+        left = CHART_LEFT + slot * index
+        x = left + (slot - width) / 2
+        top = min(y(block.millis), base - 1)
+        tip = esc(bar_tooltip(number, block, budget, trace))
+        parts.append(
+            f'<g class="seg" tabindex="0" data-tip="{tip}"><title>{tip}</title>'
+            f'<rect class="hit" x="{left:.1f}" y="{CHART_TOP}" width="{slot:.1f}" height="{height}"/>'
+            f'<path class="mark {bar_class(block)}" d="{bar_path(x, top, width, base)}"/></g>'
+        )
+        if index % labels == 0:
+            parts.append(
+                f'<text class="tick" x="{left + slot / 2:.1f}" y="{base + 16}" text-anchor="middle">{number}</text>'
+            )
+        if index == worst:
+            parts.append(
+                f'<text class="inside" x="{left + slot / 2:.1f}" y="{top - 6:.1f}" '
+                f'text-anchor="middle">{block.millis:.1f}</text>'
+            )
+
+    budget_y = y(budget)
+    parts.append(f'<line class="base" x1="{CHART_LEFT}" x2="{plot_right}" y1="{base}" y2="{base}"/>')
+    parts.append(
+        f'<line class="budget-line" x1="{CHART_LEFT}" x2="{plot_right}" '
+        f'y1="{budget_y:.1f}" y2="{budget_y:.1f}"/>'
+        f'<text class="who" x="{plot_right + 8}" y="{budget_y + 4:.1f}">budget {budget:g} ms</text>'
+    )
+    parts.append(f'<text class="tick" x="0" y="13">ms blocked</text>')
+    parts.append(
+        f'<text class="tick" x="{(CHART_LEFT + plot_right) / 2:.1f}" y="{CHART_HEIGHT - 6}" '
+        'text-anchor="middle">Block, in trace order</text>'
+    )
+    over = sum(block.breach for block in blocks)
+    label = (
+        f"{row.budget.thread}: {plural(len(blocks), 'block')}, {over} over the "
+        f"{budget:g} ms budget, longest {max(b.millis for b in blocks):.1f} ms"
+    )
+    return (
+        f'<svg class="timeline barchart" viewBox="0 0 {WIDTH} {CHART_HEIGHT}" role="img" '
+        f'aria-label="{esc(label)}">{"".join(parts)}</svg>'
+    )
+
+
+def chart_legend(row):
+    wanted = [
+        ("bar-ok", "Within budget", any(not b.breach for b in row.blocks)),
+        ("bar-over", "Over budget", any(b.breach and not b.still_open for b in row.blocks)),
+        ("bar-open", "Over budget, still open at trace end (at least this long)",
+         any(b.still_open for b in row.blocks)),
+    ]
+    items = "".join(
+        f'<span><svg viewBox="0 0 22 12" aria-hidden="true"><rect class="mark {cls}" '
+        f'x="1" y="1" width="20" height="10" rx="2"/></svg>{esc(text)}</span>'
+        for cls, text, present in wanted
+        if present
+    )
+    budget_key = (
+        '<span><svg viewBox="0 0 22 12" aria-hidden="true"><line class="budget-line" '
+        f'x1="0" x2="22" y1="6" y2="6"/></svg>Budget ({row.budget.max_ms:g} ms)</span>'
+    )
+    return f'<div class="legend">{items}{budget_key}</div>'
+
+
+def chart_table(row, trace):
+    rows = "".join(
+        f"<tr><td>{number}</td><td>{'at least ' if block.still_open else ''}{block.millis:.3f}</td>"
+        f"<td>{'over budget' if block.breach else 'within budget'}"
+        f"{', still open' if block.still_open else ''}</td>"
+        f"<td>{trace.seconds(block.start_cycles):.6f}</td><td>{block.start_line}</td></tr>"
+        for number, block in enumerate(row.blocks, 1)
+    )
+    return (
+        "<details><summary>Chart data as a table</summary>"
+        '<div class="scroll"><table><thead><tr><th>Block</th><th>Blocked (ms)</th><th>Result</th>'
+        f"<th>Start (s)</th><th>Start line</th></tr></thead><tbody>{rows}</tbody></table></div></details>"
+    )
+
+
+def budget_charts(rule, trace):
+    """One bar chart per budget; a single block is clearer as the number alone."""
+    return "".join(
+        f'<div><h3>{esc(row.budget.thread)}: time blocked in each block</h3>'
+        f'<div class="scroll">{blocks_svg(row, trace)}</div>{chart_legend(row)}'
+        f"{chart_table(row, trace)}</div>"
+        for row in rule.budgets
+        if len(row.blocks) >= 2
+    )
+
+
 def max_blocked_section(rule, trace):
     breaches = (
         f'<div>{rows_heading("Breaches", len(rule.findings))}{breaches_table(rule, trace)}</div>'
@@ -999,6 +1153,7 @@ def max_blocked_section(rule, trace):
   budget. Time in THREADY is not counted. {esc(VISIBILITY_NOTE)}</p>
   {rule_alerts(rule)}
   {budgets_table(rule)}
+  {budget_charts(rule, trace)}
   {breaches}
   {rule_coverage(rule)}
 </section>"""

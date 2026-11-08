@@ -102,6 +102,38 @@ class RulesPageTest(unittest.TestCase):
         self.assertIn("Breaches (2)</h3>", few)
         self.assertNotIn("Show all", few)
 
+    def test_chart_has_one_bar_per_block_with_breaches_in_red(self):
+        self.assertEqual(self.page.count('class="mark bar-over"') - 1, 10)
+        self.assertEqual(self.page.count('class="mark bar-open"') - 1, 1)
+        self.assertNotIn('class="mark bar-ok" d=', self.page)
+
+    def test_within_budget_bars_are_neutral(self):
+        fixed = page("demo_fixed", inversion=False, budgets=[Budget("fusion_rt", 50)])
+        self.assertEqual(fixed.count('class="mark bar-ok" d='), 11)
+        self.assertNotIn('class="mark bar-over" d=', fixed)
+
+    def test_chart_draws_the_budget_line_and_labels(self):
+        self.assertEqual(self.page.count('<line class="budget-line" x1="56"'), 1)
+        self.assertIn(">budget 50 ms</text>", self.page)
+        self.assertIn(">249.1</text>", self.page)
+        self.assertIn('aria-label="fusion_rt: 11 blocks, 11 over the 50 ms budget, longest 249.1 ms"', self.page)
+
+    def test_bars_have_tooltips_and_a_table_view(self):
+        self.assertEqual(self.page.count('<g class="seg" tabindex="0" data-tip="Block '), 11)
+        self.assertIn("Block 1: 249.094 ms", self.page)
+        self.assertIn("Block 11: at least 52.195 ms", self.page)
+        self.assertIn("Chart data as a table", self.page)
+
+    def test_budget_line_sits_at_the_budget_value(self):
+        import re
+
+        y1 = float(re.search(r'<line class="budget-line" x1="56" x2="888" y1="([\d.]+)"', self.page)[1])
+        self.assertAlmostEqual(y1, 216 - 50 / 250 * 192, places=1)
+
+    def test_one_block_gets_no_chart(self):
+        one = page("demo_inversion", inversion=False, budgets=[Budget("fusion_holder", 1000), Budget("not_a_thread", 1)])
+        self.assertNotIn('<line class="budget-line" x1="56"', one)
+
     def test_semaphore_section(self):
         self.assertIn("Findings (11)", self.page)
         self.assertIn("at priority 40 or above", self.page)
