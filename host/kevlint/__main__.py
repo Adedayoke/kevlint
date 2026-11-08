@@ -5,9 +5,25 @@ Exit status: 0 no violations, 1 violations found, 2 the trace could not be read.
 import argparse
 import sys
 
-from .inversion import HOLDER_NOTE, check
+from .inversion import HOLDER_NOTE, boost_text, check
 from .parser import TraceError, parse_trace
 from .report import render_html
+
+
+def resolved_line(trace, result):
+    """One line for the worst resolved wait, ASCII so any CI log can print it."""
+    wait = max(result.resolved, key=lambda r: r.duration_cycles)
+    name = lambda thread: trace.thread_names.get(thread, f"{thread[0]}/{thread[1]}")
+    millis = wait.duration_cycles * 1000 / trace.cycles_per_sec
+    line = (
+        f"Resolved correctly: {name(wait.waiter)} ({wait.waiter_priority}) waited "
+        f"{millis:.1f} ms on {name(wait.holder)} [holder inferred], "
+        f"{boost_text(wait, arrow='->')}"
+    )
+    if wait.middle is not None:
+        action = "ran" if wait.middle_ran else "stayed READY"
+        line += f"; {name(wait.middle)} ({wait.middle_priority}) {action}"
+    return line
 
 
 def report(path, trace, result, out):
@@ -43,6 +59,8 @@ def report(path, trace, result, out):
         )
 
     skipped = sum(result.not_evaluated.values())
+    if result.resolved:
+        print(f"\n{resolved_line(trace, result)}", file=out)
     print(f"\n{total} violation(s)", file=out)
     print(
         f"blocks: {result.evaluated + skipped} total, "

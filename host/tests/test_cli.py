@@ -37,6 +37,20 @@ class CliTest(unittest.TestCase):
                 r"\d+ block\(s\) not evaluated",
             )
 
+    def test_fixed_prints_one_resolved_line(self):
+        done = run("check", str(FIXTURES / "demo_fixed.txt"))
+        wanted = (
+            "Resolved correctly: fusion_rt (50) waited 24.3 ms on fusion_holder "
+            "[holder inferred], boosted 10 -> 50 (priority inheritance); "
+            "fusion_hog (30) stayed READY"
+        )
+        self.assertEqual(done.stdout.count(wanted), 1)
+        self.assertEqual(done.stdout.count("Resolved correctly"), 1)
+
+    def test_no_resolved_line_without_a_resolved_wait(self):
+        done = run("check", str(FIXTURES / "demo_inversion.txt"))
+        self.assertNotIn("Resolved correctly", done.stdout)
+
     def test_fixed_passes(self):
         done = run("check", str(FIXTURES / "demo_fixed.txt"))
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
