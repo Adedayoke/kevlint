@@ -50,6 +50,8 @@ class Violation:
     block_end_line: int
     middle_cycles: int
     release_cycles: int
+    holder_run_line: int
+    holder_ready_line: int
 
     @property
     def duration_cycles(self):
@@ -214,28 +216,25 @@ def _holder_priority(history, block, index):
     return entries[position - 1][1] if position > 0 else None
 
 
-def _delays_holder(history, block, run):
-    """True if run was on the holder's last CPU while the holder was in THREADY.
+def _holder_delay(history, block, run):
+    """Return (holder's last RUNNING index, its THREADY index) if run delayed it.
 
-    The holder's state comes from its latest THREAD event. The THREADY event
-    can be logged just after the preempting THRUNNING, so the holder's next
-    event also counts if it falls inside this run.
+    Returns None unless run was on the holder's last CPU while the holder was
+    in THREADY. The holder's state comes from its latest THREAD event. The
+    THREADY event can be logged just after the preempting THRUNNING, so the
+    holder's next event also counts if it falls inside this run.
     """
     entries = history.get(block.holder, [])
     position = bisect_left(entries, (run.index, -1))
-    holder_cpu = next(
-        (e[3] for e in reversed(entries[:position]) if e[2] == RUNNING), None
-    )
-    if holder_cpu != run.event.cpu:
-        return False
+    holder_run = next((e for e in reversed(entries[:position]) if e[2] == RUNNING), None)
+    if holder_run is None or holder_run[3] != run.event.cpu:
+        return None
     if position > 0 and entries[position - 1][2] == READY:
-        return True
+        return holder_run[0], entries[position - 1][0]
     stop = block.end_index if run.end_index is None else min(run.end_index, block.end_index)
-    return (
-        position < len(entries)
-        and entries[position][0] < stop
-        and entries[position][2] == READY
-    )
+    if position < len(entries) and entries[position][0] < stop and entries[position][2] == READY:
+        return holder_run[0], entries[position][0]
+    return None
 
 
 def _qualifying_runs(block, runs, history):
@@ -250,13 +249,14 @@ def _qualifying_runs(block, runs, history):
             continue
         if not holder_priority < run.priority < block.start.priority:
             continue
-        if _delays_holder(history, block, run):
+        if _holder_delay(history, block, run) is not None:
             yield run, holder_priority
 
 
-def _evaluate(block, runs, history, last_cycles):
+def _evaluate(block, runs, history, trace):
     """Return the Violation for one evaluable block, or None."""
     waiter_priority = block.start.priority
+    last_cycles = trace.events[-1].cycles
     # Evidence names the qualifying thread that ran longest during the block.
     time_total = Counter()
     first_run = {}
@@ -272,6 +272,7 @@ def _evaluate(block, runs, history, last_cycles):
         return None
     middle = max(first_run, key=lambda t: time_total[t])
     run = first_run[middle]
+    holder_run, holder_ready = _holder_delay(history, block, run)
     return Violation(
         kind=block.kind,
         sync_p=block.wait_call.fields["sync_p"],
@@ -291,6 +292,8 @@ def _evaluate(block, runs, history, last_cycles):
         block_end_line=block.end.line,
         middle_cycles=run.event.cycles,
         release_cycles=block.release.cycles,
+        holder_run_line=trace.events[holder_run].line,
+        holder_ready_line=trace.events[holder_ready].line,
     )
 
 
@@ -389,7 +392,6 @@ def _higher(current, priority):
 
 def check(trace):
     blocks, runs, history = _scan(trace)
-    last_cycles = trace.events[-1].cycles
     violations = []
     evaluated = 0
     not_evaluated = Counter()
@@ -412,7 +414,7 @@ def check(trace):
             continue
         evaluated += 1
         evaluated_max = _higher(evaluated_max, block.start.priority)
-        violation = _evaluate(block, runs, history, last_cycles)
+        violation = _evaluate(block, runs, history, trace)
         if violation is not None:
             violations.append(violation)
             continue

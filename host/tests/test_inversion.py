@@ -19,6 +19,22 @@ class NormalTraceTest(unittest.TestCase):
         self.assertEqual(result.violations, [])
 
 
+class HolderEvidenceLinesTest(unittest.TestCase):
+    def test_first_violation_records_the_holder_lines(self):
+        _, result, lines = load("demo_inversion")
+        first = result.violations[0]
+        self.assertEqual((first.holder_run_line, first.holder_ready_line), (1178, 1187))
+        self.assertIn(":THRUNNING", lines[first.holder_run_line - 1])
+        self.assertIn(":THREADY", lines[first.holder_ready_line - 1])
+
+    def test_every_violation_points_at_the_holders_own_events(self):
+        _, result, lines = load("demo_inversion")
+        for v in result.violations:
+            wanted = f"pid:{v.holder[0]} tid:{v.holder[1]} "
+            self.assertIn(wanted, lines[v.holder_run_line - 1])
+            self.assertIn(wanted, lines[v.holder_ready_line - 1])
+
+
 class FixedTraceTest(unittest.TestCase):
     def test_no_violations(self):
         _, result, _ = load("demo_fixed")
