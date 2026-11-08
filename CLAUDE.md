@@ -49,6 +49,9 @@ found.
   (semaphore) and `demo_fixed` (mutex).
 - CI (`.github/workflows/ci.yml`): unit tests, then every trace in
   `ci/traces.txt`. Reusable action: `action.yml`.
+- Optional `--explain` on `check` and `check-all` (`explain.py`, `llm.py`):
+  AI-generated explanations in the terminal and HTML report only, not in the
+  Markdown summary or CI. `--debug` logs a retry without the seed to stderr.
 - Demo PR #1 (`demo/introduce-inversion`) is red on purpose. It must NEVER be
   merged: it would turn `main` red.
 
@@ -66,14 +69,58 @@ found.
 - Tests must not assert that `ci/traces.txt` passes: the demo branch adds a
   failing trace to it.
 
+### `--explain` design
+- Never affects the verdict: explanations run after it is printed, and any
+  failure becomes a note. Without the three `KEVLINT_LLM_*` vars it prints one
+  note and skips. Output without the flag is unchanged.
+- One LLM call per violation pattern, sending only the worst occurrence: the raw
+  lines (with continuation lines) of the wait call, block start, holder's last
+  run, holder THREADY, middle became ready, middle running, release and block
+  end, plus structured fields. No file path or trace header.
+- The LLM writes exactly two JSON claims: a summary, and a cause that must say
+  "preempted". kevlint writes the "where to look" line itself from the fields,
+  citing the `sync_p` lines, and labels it as not AI, because the LLM wrongly
+  said all three threads synchronize on the semaphore.
+- The holder is always called inferred, and model text is never trusted as
+  markup: it is HTML-escaped and stripped of control characters.
+- A rejected explanation is dropped whole, with the reason shown:
+  - Citation: a claim with no lines, or any line (in `lines` or the prose) whose
+    text was not sent.
+  - Value: a hex value, priority or duration not in that claim's cited lines or
+    the fields. Durations may be rounded.
+  - Structure: not exactly two claims, or no "preempted" in the cause.
+- Transport is `urllib` only: temperature 0, seed 42, retried once without the
+  seed on HTTP 400. Three attempts on timeouts, 429 and 5xx, honoring
+  `Retry-After` up to 5 s. After retries run out, later patterns are skipped.
+- Key safety: redirects are not followed, plain http is refused except on
+  localhost, and errors never include URLs or response bodies.
+- Tests never call the real API: they use `host/tests/fake_llm.py`.
+
+### `--explain` limits
+- A citation check proves a line was sent, not that it supports the claim. The
+  value check only sees values in recognizable forms, and neither catches wrong
+  reasoning, so explanations stay labeled "claims were not verified".
+- Accuracy was judged by hand on one live response, on `demo_inversion` only.
+- The endpoint accepted the seed, which does not guarantee identical output.
+
+### `--explain` plan B (not built)
+If explanations prove wrong on real traces, do not iterate on the prompt. kevlint
+writes the causal chain deterministically, in order, with citations (middle
+became ready, preempted the holder, waiter stayed blocked until the post). The
+LLM only rewrites that verified chain as one plain-English paragraph for
+non-experts, using only facts from the chain, under the "AI-generated" label.
+
 ### Running
 ```sh
 python3 -m unittest discover -s host/tests -t host
 PYTHONPATH=host python3 -m kevlint check <trace.txt> --html <report.html>
 PYTHONPATH=host python3 -m kevlint check-all ci/traces.txt --reports-dir reports
+. ~/.kevlint_env; PYTHONPATH=host python3 -m kevlint check <trace.txt> --explain
 ```
 Exit status: 0 no violations, 1 violations, 2 a trace, list or output file could
-not be used. Only `python3` exists on this machine.
+not be used. Only `python3` exists on this machine. The LLM vars load only in
+interactive shells, so other shells must source `~/.kevlint_env` first. Never
+print the key.
 
 ### Open TODOs
 - Clean up the `MsgSend` errors printed at demo shutdown (see `target/kevdemo.h`).
