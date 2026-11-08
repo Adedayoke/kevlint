@@ -72,9 +72,11 @@ class SampleConfigTest(unittest.TestCase):
         self.assertIn("coverage: 11 evaluated, 0 not evaluated", done.stdout)
         self.assertIn("PASS: 0 finding(s) across 3 rule(s)", done.stdout)
 
-    def test_minimum_priority_moves_low_waiters_to_not_evaluated(self):
+    def test_low_waiters_are_excluded_by_config_not_unevaluated(self):
         done = run("check", trace("demo_fixed"), "--config", SAMPLE)
-        self.assertIn("(waiter below the configured minimum priority)", done.stdout)
+        self.assertRegex(done.stdout, r"excluded by config: \d+ \(waiter below the configured minimum")
+        self.assertNotIn("not evaluated: 1 (waiter below", done.stdout)
+        self.assertRegex(done.stdout, r"blocks: 71 total, 12? ?\d* ?evaluated, \d+ not evaluated, \d+ excluded by config")
 
     def test_check_all_with_html_and_summary(self):
         with tempfile.TemporaryDirectory() as folder:

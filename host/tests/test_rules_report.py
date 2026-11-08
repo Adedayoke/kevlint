@@ -56,6 +56,19 @@ class RulesPageTest(unittest.TestCase):
         self.assertIn("Priority inversions", self.page)
         self.assertIn("blocks in the trace", self.page)
 
+    def test_excluded_blocks_are_counted_and_drawn_separately(self):
+        self.assertRegex(self.page, r"10 evaluated, \d+ not evaluated, \d+ excluded by config")
+        self.assertIn('<div class="stat excluded">', self.page)
+        self.assertIn('<i class="excluded" style="flex:', self.page)
+        self.assertIn('<i class="skipped" style="flex:', self.page)
+        self.assertIn('<li class="excluded">', self.page)
+        self.assertIn('class="meter-key"', self.page)
+
+    def test_no_minimum_means_no_excluded_markup(self):
+        plain = page("demo_inversion", budgets=[Budget("fusion_rt", 50)])
+        self.assertNotIn('<div class="stat excluded">', plain)
+        self.assertNotIn('class="meter-key"', plain)
+
     def test_budget_table_and_breach_evidence(self):
         self.assertIn("Breaches (11)", self.page)
         self.assertIn("THSEM, THMUTEX", self.page)

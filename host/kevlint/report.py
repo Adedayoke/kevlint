@@ -9,7 +9,7 @@ import math
 
 from .config import INVERSION, MAX_BLOCKED
 from .explain import CHECK_NOTE, WHERE_LABEL, line_list, pattern_key
-from .inversion import HOLDER_NOTE, TYPICAL_FIXES, boost_text
+from .inversion import BELOW_MINIMUM, HOLDER_NOTE, TYPICAL_FIXES, boost_text
 from .patterns import group_patterns
 from .rules import (
     ERROR,
@@ -72,6 +72,14 @@ a.rule-link { color: inherit; font-family: var(--mono); }
 .rule-card { display: grid; gap: 12px; }
 .rule-card h3 { font-size: 13px; font-weight: 600; margin: 0; }
 .rules-off { color: var(--muted); font-size: 13px; margin-top: 10px; }
+.meter i.skipped, .meter-key i.skipped { background: var(--warning); }
+.meter i.excluded, .meter-key i.excluded { background: var(--grid); }
+.meter-key { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: -6px 0 12px;
+  color: var(--ink-2); font-size: 12.5px; }
+.meter-key span { display: inline-flex; align-items: center; gap: 6px; }
+.meter-key i { display: block; width: 12px; height: 8px; border-radius: 2px; }
+.meter-key i.done { background: var(--ink-2); }
+.stat.excluded b, .stat.excluded span, .reasons li.excluded, .reasons li.excluded b { color: var(--muted); }
 .causes { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
 .causes strong { display: block; font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
 .cause-links { color: var(--ink-2); font-size: 13px; }
@@ -717,12 +725,29 @@ def coverage_warning(result):
 
 def coverage_card(result):
     skipped = sum(result.not_evaluated.values())
-    total = result.evaluated + skipped
+    excluded = result.excluded
+    total = result.evaluated + skipped + excluded
     reasons = "".join(
         f"<li><b>{count}</b><span>{esc(reason)}</span></li>"
         for reason, count in sorted(result.not_evaluated.items())
     )
+    if excluded:
+        reasons += f'<li class="excluded"><b>{excluded}</b><span>{esc(BELOW_MINIMUM)}</span></li>'
     reasons_html = f'<ul class="reasons">{reasons}</ul>' if reasons else ""
+    excluded_stat = (
+        f'<div class="stat excluded"><b>{excluded}</b><span>excluded by config</span></div>'
+        if excluded
+        else ""
+    )
+    skipped_class = ' class="skipped"' if excluded else ""
+    excluded_bar = f'<i class="excluded" style="flex:{excluded} 1 0"></i>' if excluded else ""
+    meter_key = (
+        '<div class="meter-key"><span><i class="done"></i>evaluated</span>'
+        '<span><i class="skipped"></i>not evaluated</span>'
+        '<span><i class="excluded"></i>excluded by config</span></div>'
+        if excluded
+        else ""
+    )
     checked = result.evaluated_max_priority
     unchecked = result.not_evaluated_max_priority
     return f"""
@@ -730,12 +755,12 @@ def coverage_card(result):
   <div class="eyebrow">Coverage</div>
   <div class="stats">
     <div class="stat"><b>{result.evaluated}</b><span>evaluated</span></div>
-    <div class="stat"><b>{skipped}</b><span>not evaluated</span></div>
+    <div class="stat"><b>{skipped}</b><span>not evaluated</span></div>{excluded_stat}
     <div class="stat"><b>{total}</b><span>blocks in the trace</span></div>
   </div>
   <div class="meter" aria-hidden="true">
-    <i class="done" style="flex:{result.evaluated} 1 0"></i><i style="flex:{skipped} 1 0"></i>
-  </div>
+    <i class="done" style="flex:{result.evaluated} 1 0"></i><i{skipped_class} style="flex:{skipped} 1 0"></i>{excluded_bar}
+  </div>{meter_key}
   {reasons_html}
   <div class="priorities">Highest waiter priority:
   <b>{priority_text(checked)}</b> evaluated, <b>{priority_text(unchecked)}</b> not evaluated</div>

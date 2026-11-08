@@ -33,7 +33,8 @@ class MinimumWaiterPriorityTest(unittest.TestCase):
         result = check(self.trace, 51)
         self.assertEqual(result.violations, [])
         self.assertEqual(result.evaluated, 0)
-        self.assertGreater(result.not_evaluated["waiter below the configured minimum priority"], 0)
+        self.assertGreater(result.excluded, 0)
+        self.assertNotIn("waiter below the configured minimum priority", result.not_evaluated)
         self.assertIsNone(result.not_evaluated_max_priority)
 
     def test_every_block_is_still_counted(self):
@@ -41,7 +42,7 @@ class MinimumWaiterPriorityTest(unittest.TestCase):
         filtered = check(self.trace, 40)
         self.assertEqual(
             plain.evaluated + sum(plain.not_evaluated.values()),
-            filtered.evaluated + sum(filtered.not_evaluated.values()),
+            filtered.evaluated + sum(filtered.not_evaluated.values()) + filtered.excluded,
         )
 
 

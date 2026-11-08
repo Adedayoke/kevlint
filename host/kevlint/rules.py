@@ -59,6 +59,7 @@ class RuleResult:
     errors: list = field(default_factory=list)
     budgets: list = field(default_factory=list)
     inversion: object = None
+    excluded: int = 0
 
     @property
     def status(self):
@@ -73,7 +74,8 @@ class RuleResult:
     @property
     def coverage(self):
         skipped = sum(self.not_evaluated.values())
-        return f"{self.evaluated} evaluated, {skipped} not evaluated"
+        text = f"{self.evaluated} evaluated, {skipped} not evaluated"
+        return f"{text}, {self.excluded} excluded by config" if self.excluded else text
 
 
 @dataclass
@@ -214,6 +216,7 @@ def _inversion_rule(trace, config):
         result.not_evaluated,
         worst_ms=None if worst is None else _ms(trace, worst),
         inversion=result,
+        excluded=result.excluded,
     )
     if result.unevaluated_outranks_evaluated:
         rule.warnings.append(

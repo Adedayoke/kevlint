@@ -107,6 +107,7 @@ class Result:
     evaluated_max_priority: int = None
     not_evaluated_max_priority: int = None
     resolved: list = field(default_factory=list)
+    excluded: int = 0
 
     @property
     def unevaluated_outranks_evaluated(self):
@@ -404,11 +405,12 @@ def _higher(current, priority):
 
 
 def check(trace, min_waiter_priority=None):
-    """Run the rule. Waiters below min_waiter_priority are counted as not evaluated."""
+    """Run the rule. Waiters below min_waiter_priority are counted as excluded."""
     blocks, runs, history = _scan(trace)
     violations = []
     evaluated = 0
     not_evaluated = Counter()
+    excluded = 0
     evaluated_max = None
     not_evaluated_max = None
     resolved = []
@@ -416,8 +418,8 @@ def check(trace, min_waiter_priority=None):
     for block in blocks:
         priority = block.start.priority
         if min_waiter_priority is not None and priority is not None and priority < min_waiter_priority:
-            # Deliberately out of scope, so it never feeds the coverage warning.
-            not_evaluated[BELOW_MINIMUM] += 1
+            # Deliberately out of scope, so it never counts as a coverage gap.
+            excluded += 1
             continue
 
         reason = None
@@ -443,5 +445,5 @@ def check(trace, min_waiter_priority=None):
             resolved.append(wait)
 
     return Result(
-        violations, evaluated, not_evaluated, evaluated_max, not_evaluated_max, resolved
+        violations, evaluated, not_evaluated, evaluated_max, not_evaluated_max, resolved, excluded
     )

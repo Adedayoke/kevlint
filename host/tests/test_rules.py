@@ -219,6 +219,13 @@ class ConfiguredInversionTest(unittest.TestCase):
         dropped = run_rules(trace, Config("k", min_waiter_priority=51))[0]
         self.assertEqual((dropped.status, len(dropped.findings)), (PASS, 0))
 
+    def test_coverage_text_counts_excluded_separately(self):
+        rule = run_rules(trace_of("demo_inversion"), Config("k", min_waiter_priority=40))[0]
+        self.assertGreater(rule.excluded, 0)
+        self.assertRegex(rule.coverage, r"^\d+ evaluated, \d+ not evaluated, \d+ excluded by config$")
+        unfiltered = run_rules(trace_of("demo_inversion"), Config("k"))[0]
+        self.assertNotIn("excluded", unfiltered.coverage)
+
     def test_disabled_rule_is_absent(self):
         config = Config("k", inversion=False, budgets=[RT])
         self.assertEqual([r.name for r in run_rules(trace_of("demo_fixed"), config)], ["max-blocked-time"])

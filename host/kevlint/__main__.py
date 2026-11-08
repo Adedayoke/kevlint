@@ -13,7 +13,7 @@ from pathlib import Path
 from .config import NO_SEMAPHORE, ConfigError
 from .config import load_config as load_rules_config
 from .explain import Explainer, print_explanations
-from .inversion import HOLDER_NOTE, boost_text, check
+from .inversion import BELOW_MINIMUM, HOLDER_NOTE, boost_text, check
 from .llm import LlmClient, load_config
 from .parser import TraceError, parse_trace
 from .report import render_html
@@ -83,13 +83,16 @@ def inversion_details(trace, result, out):
     if result.resolved:
         print(f"\n{resolved_line(trace, result)}", file=out)
     print(f"\n{total} violation(s)", file=out)
+    excluded = f", {result.excluded} excluded by config" if result.excluded else ""
     print(
-        f"blocks: {result.evaluated + skipped} total, "
-        f"{result.evaluated} evaluated, {skipped} not evaluated",
+        f"blocks: {result.evaluated + skipped + result.excluded} total, "
+        f"{result.evaluated} evaluated, {skipped} not evaluated{excluded}",
         file=out,
     )
     for reason, count in sorted(result.not_evaluated.items()):
         print(f"  not evaluated: {count} ({reason})", file=out)
+    if result.excluded:
+        print(f"  excluded by config: {result.excluded} ({BELOW_MINIMUM})", file=out)
     if total:
         print(f"Note: every holder above is {HOLDER_NOTE}.", file=out)
 
