@@ -7,6 +7,7 @@ script only adds richer tooltips over the SVG <title> fallback.
 import html
 import math
 
+from .explain import CHECK_NOTE, line_list, pattern_key
 from .inversion import HOLDER_NOTE, TYPICAL_FIXES, boost_text
 from .patterns import group_patterns
 from .timeline import BLOCKED, READY, RUNNING, thread_segments
@@ -30,6 +31,16 @@ CSP = (
     "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
     "base-uri 'none'; form-action 'none'"
 )
+
+# Only reports with explanations carry this, so other reports stay unchanged.
+EXPLANATION_CSS = """
+.ai { padding: 10px 12px; border: 1px dashed var(--axis); border-left: 3px solid var(--warning); border-radius: 6px; }
+.ai-label { font-weight: 600; }
+.ai-label small { font-weight: 400; color: var(--muted); margin-left: 6px; }
+.ai-check, .ai-note { color: var(--ink-2); margin: 4px 0 0; }
+.ai ul { margin: 6px 0 0; padding-left: 20px; }
+.ai-lines { font-family: var(--mono); font-size: .9em; color: var(--muted); white-space: nowrap; }
+"""
 
 CSS = """
 :root {
@@ -501,7 +512,26 @@ def fix_lines(pattern):
     )
 
 
-def pattern_card(pattern, trace):
+def explanation_html(explanation):
+    """The labeled AI block for one pattern; model text is always escaped."""
+    if explanation is None:
+        return ""
+    if explanation.note is not None:
+        content = f'<p class="ai-note">{esc(explanation.note)}</p>'
+    else:
+        items = "".join(
+            f'<li>{esc(claim.text)} <span class="ai-lines">{esc(line_list(claim.lines))}</span></li>'
+            for claim in explanation.claims
+        )
+        content = f'<p class="ai-check">{esc(CHECK_NOTE)}</p><ul>{items}</ul>'
+    return (
+        '<div class="ai"><div class="ai-label">AI-generated explanation'
+        f"<small>worst of {plural(explanation.occurrences, 'occurrence')}</small></div>"
+        f"{content}</div>"
+    )
+
+
+def pattern_card(pattern, trace, explanation=None):
     worst = pattern.worst
     lanes = [
         (role, thread, thread_segments(trace, thread, worst.start_cycles, worst.end_cycles))
@@ -526,7 +556,7 @@ def pattern_card(pattern, trace):
     <span class="chip">worst block <b>{worst_seconds:.3f} s</b></span>
     <span class="chip mono">{esc(worst.kind)}</span>
   </div>
-  {fix_lines(pattern)}
+  {fix_lines(pattern)}{explanation_html(explanation)}
   <div class="scroll">{duration_ruler(worst.duration_cycles, trace)}</div>
   <div>
     <div class="eyebrow">Worst occurrence</div>
@@ -703,7 +733,7 @@ def footer_html(path, trace):
 </footer>"""
 
 
-def render_html(path, trace, result):
+def render_html(path, trace, result, explanations=None):
     patterns = group_patterns(result.violations)
     total = len(result.violations)
     skipped = sum(result.not_evaluated.values())
@@ -717,7 +747,7 @@ def render_html(path, trace, result):
             f"worst block {worst:.3f} s"
         )
         body = '<h2 class="section-title">Priority inversions</h2>' + "".join(
-            pattern_card(p, trace) for p in patterns
+            pattern_card(p, trace, (explanations or {}).get(pattern_key(p))) for p in patterns
         )
     else:
         summary = "No priority inversion in the evaluated blocks"
@@ -745,7 +775,7 @@ def render_html(path, trace, result):
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="{CSP}">
 <title>kevlint {verdict}: {esc(path)}</title>
-<style>{CSS}</style>
+<style>{CSS}{EXPLANATION_CSS if explanations else ""}</style>
 </head>
 <body>
 {PATTERN_DEFS}
