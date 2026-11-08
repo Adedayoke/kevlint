@@ -5,6 +5,7 @@ from pathlib import Path
 
 from kevlint.explain import (
     REJECTED,
+    SYSTEM_PROMPT,
     Explainer,
     Rejected,
     build_evidence,
@@ -38,6 +39,21 @@ class FakeClient:
         if isinstance(outcome, Exception):
             raise outcome
         return outcome
+
+
+class PromptTest(unittest.TestCase):
+    def test_asks_for_the_three_claim_structure(self):
+        for wanted in ("exactly three claims", "1. Summary", "2. Cause", "3. Where to look"):
+            self.assertIn(wanted, SYSTEM_PROMPT)
+
+    def test_requires_names_inferred_holder_and_no_advice(self):
+        self.assertIn("never by tid or pid", SYSTEM_PROMPT)
+        self.assertIn("inferred", SYSTEM_PROMPT)
+        self.assertIn("Do not suggest fixes or give QNX API advice", SYSTEM_PROMPT)
+
+    def test_is_not_tied_to_one_fixture(self):
+        for specific in ("fusion_rt", "fusion_holder", "fusion_hog", "priority 30"):
+            self.assertNotIn(specific, SYSTEM_PROMPT)
 
 
 class CitationTest(unittest.TestCase):
