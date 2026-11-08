@@ -29,6 +29,8 @@ found.
 ## Hard rules
 - NEVER invent QNX APIs, flags, event names or trace formats. Use only what is
   in /docs or visible in /fixtures. If unsure, stop and ask.
+- Headers in ~/qnx800 may be used to confirm that an API, flag or constant
+  exists. They prove existence, not behavior: ask about behavior.
 - All parsing and rules must be tested against real files in /fixtures.
 - Target code: C, built with qcc. Host code: Python 3, minimal dependencies.
 - Prefer structural rules (blocking, priority, semaphores) over absolute
