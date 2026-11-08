@@ -5,6 +5,7 @@ from pathlib import Path
 from kevlint.inversion import TYPICAL_FIXES, check
 from kevlint.parser import parse_trace
 from kevlint.report import render_html
+from kevlint.timeline import thread_segments
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 
@@ -39,7 +40,8 @@ class InversionReportTest(unittest.TestCase):
 
     def test_timeline_has_one_lane_per_role(self):
         self.assertEqual(self.page.count('<svg class="timeline"'), 1)
-        self.assertEqual(self.page.count('class="role"'), 3)
+        # Three lanes plus the shared block-length bar.
+        self.assertEqual(self.page.count('class="role"'), 4)
         for role in ("WAITER", "HOLDER", "MIDDLE"):
             self.assertIn(f">{role}</text>", self.page)
 
@@ -157,6 +159,79 @@ class PlainSummaryTest(unittest.TestCase):
         result.violations = [max(result.violations, key=lambda v: v.duration_cycles)]
         page = render_html("demo_inversion.txt", trace, result)
         self.assertIn(self.SENTENCE.format(amount="249 ms"), page)
+
+
+class ResolvedSectionTest(unittest.TestCase):
+    TITLE = "High-priority waits that resolved correctly"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.page, cls.trace, cls.result = render("demo_fixed")
+
+    def test_section_replaces_the_empty_message(self):
+        self.assertIn(self.TITLE, self.page)
+        self.assertNotIn('class="card empty"', self.page)
+
+    def test_holder_boost_is_labelled(self):
+        self.assertIn(
+            "<code>fusion_holder</code> boosted 10 → 50 (priority inheritance)", self.page
+        )
+
+    def test_middle_is_shown_staying_ready(self):
+        self.assertIn('<span class="chip ok"><code>fusion_hog</code> stayed READY</span>', self.page)
+
+    def test_timeline_has_three_lanes_and_matches_the_failing_page(self):
+        self.assertEqual(self.page.count('class="role"'), 4)
+        self.assertEqual(self.page.count('<svg class="timeline"'), 1)
+        failing, _, _ = render("demo_inversion")
+        self.assertEqual(failing.count('<svg class="timeline"'), 1)
+        for role in ("WAITER", "HOLDER", "MIDDLE", "BLOCK LENGTH"):
+            self.assertIn(f">{role}</text>", self.page)
+            self.assertIn(f">{role}</text>", failing)
+
+    def test_holder_lane_labels_the_boosted_priority(self):
+        self.assertIn("priority 50", self.page)
+        self.assertRegex(self.page, r'data-tip="[^"]*THRUNNING \(running\)[^"]*priority 50')
+
+    def test_middle_never_runs_after_becoming_ready(self):
+        wait = max(self.result.resolved, key=lambda r: r.duration_cycles)
+        segments = thread_segments(
+            self.trace, wait.middle, wait.start_cycles, wait.end_cycles
+        )
+        self.assertNotIn("THRUNNING", [s.state for s in segments])
+        self.assertIn("THREADY", [s.state for s in segments])
+
+    def test_section_absent_when_nothing_resolved(self):
+        for name in ("demo_inversion", "demo_normal"):
+            self.assertNotIn(self.TITLE, render(name)[0])
+
+    def test_semaphore_boost_does_not_claim_inheritance(self):
+        trace = parse_trace(FIXTURES / "demo_fixed.txt")
+        result = check(trace)
+        for wait in result.resolved:
+            wait.kind = "THSEM"
+        page = render_html("demo_fixed.txt", trace, result)
+        self.assertIn("<code>fusion_holder</code> boosted 10 → 50</span>", page)
+        self.assertNotIn("Why it worked", page)
+
+
+class SharedScaleTest(unittest.TestCase):
+    def ruler(self, name):
+        page = render(name)[0]
+        return re.search(r'<svg class="timeline ruler".*?</svg>', page, re.S)[0]
+
+    def bar_width(self, ruler):
+        return float(re.search(r'class="mark blocked" x="[\d.]+" y="2" width="([\d.]+)"', ruler)[1])
+
+    def test_both_pages_use_the_same_scale(self):
+        before, after = self.ruler("demo_inversion"), self.ruler("demo_fixed")
+        for ruler in (before, after):
+            self.assertIn("shared 300 ms scale", ruler)
+
+    def test_bar_lengths_reflect_the_real_ratio(self):
+        before = self.bar_width(self.ruler("demo_inversion"))
+        after = self.bar_width(self.ruler("demo_fixed"))
+        self.assertAlmostEqual(before / after, 0.24909 / 0.02428, delta=0.3)
 
 
 class PriorityCoverageTest(unittest.TestCase):

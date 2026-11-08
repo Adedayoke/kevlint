@@ -7,7 +7,7 @@ script only adds richer tooltips over the SVG <title> fallback.
 import html
 import math
 
-from .inversion import HOLDER_NOTE, TYPICAL_FIXES
+from .inversion import HOLDER_NOTE, TYPICAL_FIXES, boost_text
 from .patterns import group_patterns
 from .timeline import BLOCKED, READY, RUNNING, thread_segments
 
@@ -22,6 +22,9 @@ MIN_MARK = 2
 MIN_HIT = 12
 BADGE_SPACING = 20
 LABEL_CHARS = 20
+# Every report draws block length on this scale, so two reports compare directly.
+RULER_MS = 300
+RULER_STEP_MS = 100
 
 CSP = (
     "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
@@ -111,6 +114,10 @@ code, .mono { font-family: var(--mono); font-size: .92em; }
 .chip { padding: 2px 10px; border: 1px solid var(--border); border-radius: 999px;
   color: var(--ink-2); font-size: 13px; font-variant-numeric: tabular-nums; }
 .chip b { color: var(--ink); }
+.chip.ok { border-color: var(--good); color: var(--ink); }
+.chip.ok::before { content: "\\2713"; margin-right: 6px; color: var(--good); font-weight: 700; }
+.section-title { font-size: 12px; font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted); margin: 6px 0 -6px; }
 .fix { padding: 10px 12px; background: var(--code); border-radius: 6px; }
 .fix strong { margin-right: 6px; }
 .scroll { overflow-x: auto; }
@@ -277,7 +284,7 @@ def tooltip(segment, scale):
     return "\n".join(lines)
 
 
-def segment_svg(segment, scale, y):
+def segment_svg(segment, scale, y, show_priority=False):
     left = scale.x(segment.start_cycles)
     true_width = scale.x(segment.end_cycles) - left
     width = max(true_width - 2, MIN_MARK)
@@ -288,7 +295,11 @@ def segment_svg(segment, scale, y):
     text = tooltip(segment, scale)
     label = ""
     duration = ms_text(scale.duration_ms(segment.end_cycles - segment.start_cycles))
-    if width >= 150:
+    if show_priority and width >= 70 and segment.priority is not None:
+        label = f"priority {segment.priority}"
+        if width >= 240:
+            label = f"{segment.state} · priority {segment.priority} · {duration}"
+    elif width >= 150:
         label = f"{segment.state} · {duration}"
     elif width >= 70:
         label = segment.state
@@ -317,7 +328,7 @@ def badge_positions(true_xs):
     return positions
 
 
-def timeline_svg(trace, violation, lanes):
+def timeline_svg(trace, violation, lanes, marker_list, priority_roles=()):
     scale = Scale(trace, violation.start_cycles, violation.end_cycles)
     bottom = TOP + len(lanes) * (LANE_HEIGHT + LANE_GAP) - LANE_GAP
     height = bottom + AXIS_HEIGHT
@@ -349,9 +360,8 @@ def timeline_svg(trace, violation, lanes):
             f"<title>{esc(trace.describe(thread))}</title></text>"
         )
         for segment in sorted(segments, key=lambda s: s.start_cycles - s.end_cycles):
-            parts.append(segment_svg(segment, scale, y))
+            parts.append(segment_svg(segment, scale, y, role in priority_roles))
 
-    marker_list = markers(violation)
     positions = badge_positions([scale.x(cycles) for _, _, cycles, _ in marker_list])
     for (number, _, cycles, _), badge_x in zip(marker_list, positions):
         x = scale.x(cycles)
@@ -365,13 +375,41 @@ def timeline_svg(trace, violation, lanes):
     return "".join(parts)
 
 
-def markers(violation):
-    return [
-        (1, "block start", violation.start_cycles, violation.block_start_line),
-        (2, "middle first ran", violation.middle_cycles, violation.middle_line),
-        (3, "release", violation.release_cycles, violation.release_line),
-        (4, "block end", violation.end_cycles, violation.block_end_line),
-    ]
+def markers(item, middle_label="middle first ran"):
+    rows = [("block start", item.start_cycles, item.block_start_line)]
+    if item.middle_cycles is not None:
+        rows.append((middle_label, item.middle_cycles, item.middle_line))
+    rows.append(("release", item.release_cycles, item.release_line))
+    rows.append(("block end", item.end_cycles, item.block_end_line))
+    return [(number, *row) for number, row in enumerate(rows, 1)]
+
+
+def duration_ruler(cycles, trace):
+    """Draw block length on a scale shared by every report."""
+    value = cycles * 1000 / trace.cycles_per_sec
+    top = max(RULER_MS, math.ceil(value / RULER_STEP_MS) * RULER_STEP_MS)
+    plot = WIDTH - LEFT - RIGHT
+    width = max(value / top * plot, MIN_MARK)
+    ticks = "".join(
+        f'<line class="grid" x1="{LEFT + mark / top * plot:.1f}" '
+        f'x2="{LEFT + mark / top * plot:.1f}" y1="0" y2="24"/>'
+        f'<text class="tick" x="{LEFT + mark / top * plot:.1f}" y="40" '
+        f'text-anchor="middle">{mark}</text>'
+        for mark in range(0, top + 1, RULER_STEP_MS)
+    )
+    text = f"{ms_text(value)} blocked, on a fixed 0 to {top} ms scale"
+    return (
+        f'<svg class="timeline ruler" viewBox="0 0 {WIDTH} 44" role="img" '
+        f'aria-label="{esc(text)}">{ticks}'
+        '<text class="role" x="0" y="11">BLOCK LENGTH</text>'
+        f'<text class="tick" x="0" y="26">shared {top} ms scale</text>'
+        f'<text class="tick" x="{LEFT - 8}" y="40" text-anchor="end">ms</text>'
+        f'<g class="seg" tabindex="0" data-tip="{esc(text)}"><title>{esc(text)}</title>'
+        f'<rect class="hit" x="{LEFT}" y="2" width="{max(width, MIN_HIT):.1f}" height="20"/>'
+        f'<rect class="mark blocked" x="{LEFT}" y="2" width="{width:.1f}" height="20" rx="4"/></g>'
+        f'<text class="inside" x="{LEFT + width + 8:.1f}" y="17">{esc(ms_text(value))}</text>'
+        "</svg>"
+    )
 
 
 def legend_html():
@@ -387,10 +425,10 @@ def legend_html():
     )
 
 
-def markers_html(violation):
+def markers_html(marker_list):
     items = "".join(
         f"<li><b>{number}</b>{esc(label)}, line {line}</li>"
-        for number, label, _, line in markers(violation)
+        for number, label, _, line in marker_list
     )
     return f'<ol class="markers">{items}</ol>'
 
@@ -416,7 +454,7 @@ def segments_table(lanes, scale, trace):
     )
 
 
-def occurrences_table(pattern, trace):
+def occurrences_table(pattern, trace, middle_heading="Middle ran"):
     worst = pattern.worst
     rows = []
     for number, v in enumerate(pattern.occurrences, 1):
@@ -427,13 +465,14 @@ def occurrences_table(pattern, trace):
             f"<td>{trace.seconds(v.end_cycles):.6f}</td>"
             f"<td>{v.duration_cycles / trace.cycles_per_sec:.3f}</td>"
             f'<td class="mono">{esc(v.kind)}</td><td class="mono">{esc(v.sync_p)}</td>'
-            f"<td>{v.wait_call_line}</td><td>{v.block_start_line}</td><td>{v.middle_line}</td>"
+            f"<td>{v.wait_call_line}</td><td>{v.block_start_line}</td>"
+            f'<td>{"" if v.middle_line is None else v.middle_line}</td>'
             f"<td>{v.release_line}</td><td>{v.block_end_line}</td></tr>"
         )
     return (
         '<div class="scroll"><table><thead><tr><th>#</th><th>Start (s)</th><th>End (s)</th>'
         "<th>Block (s)</th><th>State</th><th>sync_p</th><th>Wait call</th><th>Block start</th>"
-        "<th>Middle ran</th><th>Release</th><th>Block end</th></tr></thead>"
+        f"<th>{esc(middle_heading)}</th><th>Release</th><th>Block end</th></tr></thead>"
         f'<tbody>{"".join(rows)}</tbody></table></div>'
     )
 
@@ -475,6 +514,7 @@ def pattern_card(pattern, trace):
     scale = Scale(trace, worst.start_cycles, worst.end_cycles)
     worst_seconds = worst.duration_cycles / trace.cycles_per_sec
     count = len(pattern.occurrences)
+    marker_list = markers(worst)
     return f"""
 <section class="card pattern">
   <h3>{thread_html(trace, pattern.waiter)} <em>(priority {worst.waiter_priority}) blocked by</em>
@@ -487,14 +527,96 @@ def pattern_card(pattern, trace):
     <span class="chip mono">{esc(worst.kind)}</span>
   </div>
   {fix_lines(pattern)}
+  <div class="scroll">{duration_ruler(worst.duration_cycles, trace)}</div>
   <div>
     <div class="eyebrow">Worst occurrence</div>
-    <div class="scroll">{timeline_svg(trace, worst, lanes)}</div>
+    <div class="scroll">{timeline_svg(trace, worst, lanes, marker_list)}</div>
   </div>
   {legend_html()}
-  {markers_html(worst)}
+  {markers_html(marker_list)}
   <details><summary>Occurrences and evidence lines <small>{plural(count, "occurrence")}</small></summary>
   {occurrences_table(pattern, trace)}</details>
+  <details><summary>Timeline as a table</summary>{segments_table(lanes, scale, trace)}</details>
+</section>"""
+
+
+def resolved_card(pattern, trace):
+    worst = pattern.worst
+    roles = [("waiter", pattern.waiter), ("holder", pattern.holder)]
+    if pattern.middle is not None:
+        roles.append(("middle", pattern.middle))
+    lanes = [
+        (role, thread, thread_segments(trace, thread, worst.start_cycles, worst.end_cycles))
+        for role, thread in roles
+    ]
+    scale = Scale(trace, worst.start_cycles, worst.end_cycles)
+    seconds = worst.duration_cycles / trace.cycles_per_sec
+    count = len(pattern.occurrences)
+    marker_list = markers(worst, "middle became ready")
+    waiter = thread_html(trace, pattern.waiter)
+    holder = thread_html(trace, pattern.holder)
+    boosted = worst.holder_peak_priority > worst.holder_base_priority
+    inherited = boosted and worst.kind == "THMUTEX"
+    holder_priority = (
+        f"{worst.holder_base_priority} → {worst.holder_peak_priority}"
+        if boosted
+        else worst.holder_base_priority
+    )
+    amount = brief_ms(worst.duration_cycles, trace)
+    if count > 1:
+        amount = f"up to {amount}"
+
+    title_end = "<em>held the lock</em>"
+    middle_sentence = ""
+    middle_chip = ""
+    if pattern.middle is not None:
+        middle = thread_html(trace, pattern.middle)
+        outcome = "ran" if worst.middle_ran else "stayed READY"
+        title_end = (
+            f"<em>while</em> {middle} <em>(priority {worst.middle_priority}) {outcome}</em>"
+        )
+        middle_sentence = (
+            f" The less urgent {middle} also ran during this block."
+            if worst.middle_ran
+            else f" The less urgent {middle} stayed READY and never took the CPU."
+        )
+        if not worst.middle_ran:
+            middle_chip = f'<span class="chip ok">{middle} stayed READY</span>'
+
+    holder_outcome = (
+        "which ran at the waiter’s priority until it released the lock."
+        if inherited
+        else "which released it."
+    )
+    why = (
+        '<p class="fix"><strong>Why it worked</strong>QNX mutexes use priority inheritance, '
+        "so the holder could not be held up by lower-priority work.</p>"
+        if inherited
+        else ""
+    )
+    return f"""
+<section class="card pattern resolved">
+  <h3>{waiter} <em>(priority {worst.waiter_priority}) waited on</em>
+  {holder} <em>(priority {holder_priority})</em> {title_end}</h3>
+  <p class="plain">The urgent thread {waiter} waited {amount} for a lock held by {holder},
+  {holder_outcome}{middle_sentence}</p>
+  <div class="chips">
+    <span class="chip"><b>{plural(count, "occurrence")}</b></span>
+    <span class="chip">worst block <b>{seconds:.3f} s</b></span>
+    <span class="chip mono">{esc(worst.kind)}</span>
+    <span class="chip{" ok" if boosted else ""}">{holder} {esc(boost_text(worst))}</span>
+    {middle_chip}
+  </div>
+  {why}
+  <div class="scroll">{duration_ruler(worst.duration_cycles, trace)}</div>
+  <div>
+    <div class="eyebrow">Worst occurrence</div>
+    <div class="scroll">{timeline_svg(trace, worst, lanes, marker_list, ("holder",))}</div>
+  </div>
+  {legend_html()}
+  {markers_html(marker_list)}
+  <details><summary>Occurrences and evidence lines <small>{plural(count, "occurrence")}</small></summary>
+  {occurrences_table(pattern, trace, "Middle ready")}</details>
   <details><summary>Timeline as a table</summary>{segments_table(lanes, scale, trace)}</details>
 </section>"""
 
@@ -594,12 +716,23 @@ def render_html(path, trace, result):
             f"{plural(total, 'violation')} in {plural(len(patterns), 'pattern')}, "
             f"worst block {worst:.3f} s"
         )
-        body = "".join(pattern_card(p, trace) for p in patterns)
+        body = '<h2 class="section-title">Priority inversions</h2>' + "".join(
+            pattern_card(p, trace) for p in patterns
+        )
     else:
         summary = "No priority inversion in the evaluated blocks"
         body = (
-            '<section class="card empty">No violations in the blocks this rule could '
+            ""
+            if result.resolved
+            else '<section class="card empty">No violations in the blocks this rule could '
             "evaluate. See coverage above for the blocks it could not.</section>"
+        )
+
+    if result.resolved:
+        worst_resolved = group_patterns(result.resolved)[0]
+        body += (
+            '<h2 class="section-title">High-priority waits that resolved correctly</h2>'
+            + resolved_card(worst_resolved, trace)
         )
 
     verdict = "FAIL" if failed else "PASS"
