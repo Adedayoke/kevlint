@@ -91,6 +91,8 @@ code, .mono { font-family: var(--mono); font-size: .92em; }
 .reasons li { display: flex; gap: 10px; padding: 3px 0; }
 .reasons b { min-width: 2.5em; text-align: right; color: var(--ink);
   font-variant-numeric: tabular-nums; }
+.plain { color: var(--ink-2); }
+.plain code { color: var(--ink); }
 .note { color: var(--ink-2); }
 .note strong { color: var(--ink); }
 .pattern { display: grid; gap: 14px; }
@@ -427,6 +429,22 @@ def occurrences_table(pattern, trace):
     )
 
 
+def brief_ms(cycles, trace):
+    value = cycles * 1000 / trace.cycles_per_sec
+    return f"{value:.0f} ms" if value >= 1 else f"{value:.2f} ms"
+
+
+def plain_summary(pattern, trace):
+    amount = brief_ms(pattern.worst.duration_cycles, trace)
+    if len(pattern.occurrences) > 1:
+        amount = f"up to {amount}"
+    return (
+        f"The urgent thread {thread_html(trace, pattern.waiter)} waited {amount} for a lock "
+        f"held by {thread_html(trace, pattern.holder)}, which couldn’t finish because "
+        f"the less urgent {thread_html(trace, pattern.middle)} kept the CPU."
+    )
+
+
 def fix_lines(pattern):
     kinds = sorted({v.kind for v in pattern.occurrences}, reverse=True)
     return "".join(
@@ -453,6 +471,7 @@ def pattern_card(pattern, trace):
   <h3>{thread_html(trace, pattern.waiter)} <em>(priority {worst.waiter_priority}) blocked by</em>
   {thread_html(trace, pattern.holder)} <em>(priority {worst.holder_priority}) while</em>
   {thread_html(trace, pattern.middle)} <em>(priority {worst.middle_priority}) ran</em></h3>
+  <p class="plain">{plain_summary(pattern, trace)}</p>
   <div class="chips">
     <span class="chip"><b>{plural(count, "occurrence")}</b></span>
     <span class="chip">worst block <b>{worst_seconds:.3f} s</b></span>

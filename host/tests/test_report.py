@@ -140,5 +140,24 @@ class TypicalFixByLockTest(unittest.TestCase):
         self.assertIn(TYPICAL_FIXES["THMUTEX"], page)
 
 
+class PlainSummaryTest(unittest.TestCase):
+    SENTENCE = (
+        "The urgent thread <code>fusion_rt</code> waited {amount} for a lock held by "
+        "<code>fusion_holder</code>, which couldn\u2019t finish because the less urgent "
+        "<code>fusion_hog</code> kept the CPU."
+    )
+
+    def test_repeated_pattern_says_up_to(self):
+        page, _, _ = render("demo_inversion")
+        self.assertIn(self.SENTENCE.format(amount="up to 249 ms"), page)
+
+    def test_single_occurrence_states_the_time(self):
+        trace = parse_trace(FIXTURES / "demo_inversion.txt")
+        result = check(trace)
+        result.violations = [max(result.violations, key=lambda v: v.duration_cycles)]
+        page = render_html("demo_inversion.txt", trace, result)
+        self.assertIn(self.SENTENCE.format(amount="249 ms"), page)
+
+
 if __name__ == "__main__":
     unittest.main()
