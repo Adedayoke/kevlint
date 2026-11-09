@@ -73,7 +73,7 @@ QNX on the runner.
 steps:
   - uses: actions/checkout@v7
 
-  - uses: Adedayoke/kevlint@main
+  - uses: Adedayoke/kevlint@v0.1.0
     with:
       trace: traces/my_system.txt
       report: reports/my_system.html
