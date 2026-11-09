@@ -8,18 +8,16 @@ trace lines behind it, and every PASS says how many blocks it could not evaluate
 optional LLM explains violations from those same lines, and can never change the
 verdict.
 
-<!-- TODO(screenshots): replace both placeholders below, then delete this comment.
-     Regenerate the pages with the two `check` commands in "Run it locally". -->
+**Before:** `fixtures/demo_inversion.txt`. The urgent thread waits behind unrelated work.
 
-> **[SCREENSHOT PLACEHOLDER 1: BEFORE]**
-> HTML report for `fixtures/demo_inversion.txt`, showing FAIL and the timeline.
-> Suggested file: `docs/images/report-before.png`
+![kevlint HTML report for demo_inversion: FAIL, with fusion_rt blocked for 249 ms while fusion_hog runs and fusion_holder sits ready](docs/images/report-before.png)
 
-> **[SCREENSHOT PLACEHOLDER 2: AFTER]**
-> HTML report for `fixtures/demo_fixed.txt`, showing PASS and the priority boost.
-> Suggested file: `docs/images/report-after.png`
+**After:** `fixtures/demo_fixed.txt`. The holder is boosted from priority 10 to 50.
 
-The two reports come from the same demo workload, recorded on QNX 8.0 under QEMU. A
+![kevlint HTML report for demo_fixed: PASS, with fusion_holder boosted to priority 50 and fusion_rt blocked for 24 ms](docs/images/report-after.png)
+
+These images are cropped to the verdict and the worst occurrence, and the full reports have
+more. The two reports come from the same demo workload, recorded on QNX 8.0 under QEMU. A
 priority 10 thread holds a lock that a priority 50 thread needs, while a priority 30
 thread hogs the CPU. The only change is the lock.
 
