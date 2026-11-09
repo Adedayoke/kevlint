@@ -38,6 +38,10 @@ REQUIRED = (
 
 
 class SampleConfigTest(unittest.TestCase):
+    def test_sample_exits_two_on_a_trace_without_the_workload(self):
+        done = run("check", trace("test_wide"), "--config", SAMPLE)
+        self.assertEqual(done.returncode, 2, done.stdout + done.stderr)
+
     def test_exit_status_for_each_demo(self):
         for name, wanted in (("demo_normal", 0), ("demo_fixed", 0), ("demo_inversion", 1)):
             done = run("check", trace(name), "--config", SAMPLE)

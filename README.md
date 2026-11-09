@@ -86,6 +86,14 @@ takes `--config`, `--html`, `--explain` and `--debug`, as `check` does.
 - A workload that keeps running after the trace gets 30 seconds to finish, then is
   left running on the target with a warning.
 
+Two guards stop a trace without the workload from passing:
+
+- **Workload ended early:** if the `--run` workload ends before tracing ends, the
+  capture exits 2 and writes no files.
+- **Required thread missing:** with `--config`, a budget with `required = true`
+  exits 2 if its thread is not in the trace. The sample `kevlint.toml` requires
+  `fusion_rt`. This needs a config: without `--config`, only the first guard applies.
+
 | Exit status | Meaning |
 |---|---|
 | 0 | No violations |

@@ -12,7 +12,7 @@ enabled = true
 # states defaults to ["THSEM", "THMUTEX"]. Add others to opt in, for example
 # states = ["THSEM", "THMUTEX", "THSEND", "THREPLY"].
 # required = true makes kevlint exit 2 if the thread is not in a trace.
-budgets = [{ thread = "fusion_rt", max_ms = 50 }]
+budgets = [{ thread = "fusion_rt", max_ms = 50, required = true }]
 
 [rules.no-semaphore-high-priority]
 enabled = true
