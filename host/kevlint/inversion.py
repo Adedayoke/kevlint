@@ -1,6 +1,7 @@
 """Priority-inversion rule.
 
-A block is a thread in THSEM or THMUTEX. It is a violation when a thread with
+A block is a thread in THSEM or THMUTEX. Other lock states are only counted as
+not evaluated. A block is a violation when a thread with
 priority strictly between the waiter's and the holder's ran during the block,
 on the CPU where the holder last ran, while the holder was in THREADY.
 
@@ -33,6 +34,13 @@ CALLS = {
     "THMUTEX": ("SYNC_MUTEX_LOCK/80", "SYNC_MUTEX_UNLOCK/81"),
 }
 RELEASE_KIND = {release: kind for kind, (_, release) in CALLS.items()}
+# Lock states seen in real traces whose wait and release are not modeled here. They
+# are counted as not evaluated, so that a PASS does not hide them.
+UNCHECKED_LOCK_STATES = ("THRWLOCK_WRITE", "THRWLOCK_READ", "THMUON_MUTEX")
+
+
+def unchecked_lock_reason(state):
+    return f"blocked in {state}, which this rule does not check"
 
 
 @dataclass
@@ -197,9 +205,9 @@ def _scan(trace):
         if block is not None and event.name != block.kind:
             block.end_index, block.end = index, event
             del open_blocks[thread]
-        elif block is None and event.name in CALLS:
+        elif block is None and (event.name in CALLS or event.name in UNCHECKED_LOCK_STATES):
             call = last_call.get(thread)
-            matches = call is not None and call.name == CALLS[event.name][0]
+            matches = event.name in CALLS and call is not None and call.name == CALLS[event.name][0]
             block = _Block(
                 thread,
                 event.name,
@@ -437,7 +445,9 @@ def check(trace, min_waiter_priority=None):
             continue
 
         reason = None
-        if block.wait_call is None:
+        if block.kind in UNCHECKED_LOCK_STATES:
+            reason = unchecked_lock_reason(block.kind)
+        elif block.wait_call is None:
             reason = "no matching wait call in the trace"
         elif block.end is None:
             reason = "block still open when the trace ended"

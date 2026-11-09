@@ -77,8 +77,8 @@ class PassReportTest(unittest.TestCase):
         page, _, _ = render("demo_fixed")
         self.assertIn('class="banner pass"', page)
         self.assertIn('<div class="verdict">PASS</div>', page)
-        self.assertIn("<b>13 of 71</b> blocks evaluated", page)
-        self.assertIn("<b>58</b> not evaluated", page)
+        self.assertIn("<b>13 of 72</b> blocks evaluated", page)
+        self.assertIn("<b>59</b> not evaluated", page)
         self.assertIn("Holders are inferred", page)
 
     def test_pass_has_no_pattern_card(self):

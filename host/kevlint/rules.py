@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 from .config import BLOCKING_STATES, INVERSION, MAX_BLOCKED, NO_SEMAPHORE
 from .explain import SYNC_OBJECT
-from .inversion import _scan, check
+from .inversion import UNCHECKED_LOCK_STATES, _scan, check
 from .timeline import NOT_A_STATE
 
 PASS = "PASS"
@@ -12,6 +12,8 @@ FAIL = "FAIL"
 NOT_EVALUATED = "NOT EVALUATED"
 ERROR = "ERROR"
 
+# Collected so a budget can report them as coverage gaps; config validation is separate.
+TRACKED_STATES = BLOCKING_STATES | set(UNCHECKED_LOCK_STATES)
 OPEN_WITHIN_BUDGET = "block still open when the trace ended, within budget so far"
 STARTED_WITHIN_BUDGET = "block already in progress when the trace started, within budget so far"
 
@@ -196,7 +198,7 @@ def collect_waits(trace):
                 continue
             wait.end = event
             del current[thread]
-        if event.name in BLOCKING_STATES:
+        if event.name in TRACKED_STATES:
             wait = Wait(thread, event.name, event, start_unknown=first_state)
             current[thread] = wait
             waits.append(wait)
@@ -266,7 +268,11 @@ def _check_budget(trace, budget, threads, waits, blocks, rule):
     """Add one found thread name's breaches and coverage to rule."""
     row = BudgetResult(budget, PASS)
     for wait in waits:
-        if wait.thread not in threads or wait.state not in budget.states:
+        if wait.thread not in threads:
+            continue
+        if wait.state not in budget.states:
+            if wait.state in UNCHECKED_LOCK_STATES:
+                rule.not_evaluated[f"blocked in {wait.state}, not in this budget's states"] += 1
             continue
         millis = _ms(trace, _duration(trace, wait))
         if millis <= budget.max_ms and (wait.end is None or wait.start_unknown):

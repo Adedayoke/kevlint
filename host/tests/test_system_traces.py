@@ -3,12 +3,13 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 
 from kevlint.capture import check_span, trace_span, CaptureError
 from kevlint.config import Budget, Config
-from kevlint.inversion import _qualifying_runs, _scan, check
+from kevlint.inversion import UNCHECKED_LOCK_STATES, _qualifying_runs, _scan, check, unchecked_lock_reason
 from kevlint.parser import Event, Trace, parse_trace
 from kevlint.report import markers
 from kevlint.rules import STARTED_WITHIN_BUDGET, collect_waits, run_rules
@@ -35,6 +36,80 @@ class ParsingTest(unittest.TestCase):
     def test_all_states_in_the_busy_trace_are_kept(self):
         names = {e.name for e in fixture("system_busy").events if e.cls == "THREAD"}
         self.assertTrue({"THRWLOCK_WRITE", "THMUON_MUTEX", "THTRACEBUFFER", "THDESTROY"} <= names)
+
+
+def lock_block_counts(trace):
+    """Count entries to each unchecked lock state, directly from the THREAD events."""
+    state = {}
+    counts = Counter()
+    for event in trace.events:
+        if event.cls != "THREAD" or event.name == "THCREATE":
+            continue
+        if event.name in UNCHECKED_LOCK_STATES and state.get(event.thread) != event.name:
+            counts[event.name] += 1
+        state[event.thread] = event.name
+    return counts
+
+
+class UncheckedLockStatesTest(unittest.TestCase):
+    def test_real_trace_counts_each_state_as_not_evaluated(self):
+        trace = fixture("system_busy")
+        result = check(trace)
+        counts = lock_block_counts(trace)
+        self.assertGreater(counts["THRWLOCK_WRITE"], 0)
+        self.assertGreater(counts["THMUON_MUTEX"], 0)
+        for state, count in counts.items():
+            self.assertEqual(result.not_evaluated[unchecked_lock_reason(state)], count, state)
+
+    def test_read_lock_is_counted_too(self):
+        def state(line, name):
+            return Event(line, line, 0, "THREAD", name, {"pid": "7", "tid": "1", "priority": "21"})
+
+        events = [state(1, "THRUNNING"), state(2, "THRWLOCK_READ"), state(3, "THREADY")]
+        result = check(Trace(1000, 1, events, {}))
+        self.assertEqual(result.not_evaluated[unchecked_lock_reason("THRWLOCK_READ")], 1)
+        self.assertEqual(result.evaluated, 0)
+
+    def test_they_never_produce_a_finding_or_change_the_verdict(self):
+        self.assertEqual(check(fixture("system_busy")).violations, [])
+
+    def test_below_the_minimum_they_are_excluded_not_a_gap(self):
+        result = check(fixture("system_busy"), 40)
+        self.assertNotIn(unchecked_lock_reason("THRWLOCK_WRITE"), result.not_evaluated)
+        self.assertGreater(result.excluded, 0)
+
+    def test_budget_reports_them_only_for_its_own_thread(self):
+        trace = fixture("system_busy")
+        reason = "blocked in THRWLOCK_WRITE, not in this budget's states"
+        rule = run_rules(trace, Config("sample", budgets=[Budget("resmgr chan 1", 100)]))[-1]
+        self.assertEqual(rule.not_evaluated[reason], 119)
+        self.assertEqual(rule.findings, [])
+        other = run_rules(trace, Config("sample", budgets=[Budget("fsys_resmgr", 1000)]))[-1]
+        self.assertEqual(other.not_evaluated[reason], 0)
+
+    def test_a_state_opted_in_to_a_budget_is_measured_instead(self):
+        trace = fixture("system_busy")
+        budget = Budget("virtio_pci0 irq 257", 1000, states=("THMUON_MUTEX",))
+        rule = run_rules(trace, Config("sample", budgets=[budget]))[-1]
+        self.assertEqual(rule.not_evaluated["blocked in THMUON_MUTEX, not in this budget's states"], 0)
+        self.assertEqual(rule.budgets[0].evaluated, 3)
+
+    def test_terminal_and_html_state_the_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "r.html"
+            done = subprocess.run(
+                [
+                    sys.executable, "-m", "kevlint", "check", str(FIXTURES / "system_busy.txt"),
+                    "--html", str(report),
+                ],
+                capture_output=True,
+                text=True,
+                env={"PYTHONPATH": str(ROOT / "host")},
+            )
+            self.assertEqual(done.returncode, 0, done.stderr)
+            reason = unchecked_lock_reason("THRWLOCK_WRITE")
+            self.assertIn(f"not evaluated: 257 ({reason})", done.stdout)
+            self.assertIn(reason, report.read_text(encoding="utf-8"))
 
 
 class VerdictTest(unittest.TestCase):
