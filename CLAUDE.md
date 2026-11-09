@@ -47,6 +47,9 @@ found.
   Markdown job summary (`summary.py`).
 - Demo workload in `target/` and fixtures `demo_normal`, `demo_inversion`
   (semaphore) and `demo_fixed` (mutex).
+- Real system fixtures with no demo workload: `system_idle` (5 s) and `system_busy`
+  (1 s of `find`, `cp`, `curl` and `ping`). They contain `THRWLOCK_WRITE` and
+  `THMUON_MUTEX`, which the rules do not evaluate.
 - Rules config (`config.py`, `rules.py`, sample `kevlint.toml`): `--config FILE`
   on `check` and `check-all` runs up to three rules, with results per rule in the
   terminal, HTML report and Markdown summary.
@@ -70,6 +73,11 @@ found.
   or unlock on the same `sync_p`, in the same process, released the waiter.
 - Violation: a thread with priority strictly between waiter and holder ran on
   the holder's last CPU while the holder was in THREADY.
+- The release can be logged before the waiter's block event: with the holder on
+  another CPU, its unlock lands between the waiter's lock call and its THMUTEX event.
+  A release after the wait call counts as the release.
+- THCREATE only says a thread exists, so it never ends a block. Tracing starts with a
+  per-CPU state dump, so THCREATE and a repeated state can appear after real events.
 - A priority boost only shows on the holder's next THREAD event, and is logged
   before the waiter's block starts. Read the holder's base priority from before
   the waiter's wait call.
@@ -118,8 +126,9 @@ found.
   - Not evaluated, with a reason: a real coverage gap.
   - Excluded by config: deliberately out of scope (below `min_waiter_priority`).
     Never feeds the not-evaluated warning, and is grey in the coverage bar.
-- A block already in progress when the trace starts has no visible start, so it
-  cannot be measured. The report says so.
+- A block already in progress when the trace starts has no visible start (the thread's
+  first state event in the trace is the block). `max-blocked-time` reports it as "at
+  least" if over budget, otherwise not evaluated. The inversion rule cannot evaluate it.
 
 ### Capture
 - The verdict comes from the normal check, so exit codes match `check`. Every
@@ -131,6 +140,10 @@ found.
 - The demo's real-time threads can starve the shell, so `--settle` and `sleep` are
   only approximate under load.
 - A non-zero workload exit after the trace is a warning, recorded in `name.json`.
+- A trace covering under 90% of `--seconds` is an error. Live test: with `/tmp` nearly
+  full, `tracelogger` exits 0 and prints nothing, and the `.kev` stops where the disk
+  did. A busy system wrote about 2 MB/s, and `/tmp` has 48 MB free. Real traces cover
+  at least 2.93 s of a 3 s request.
 - A stopped sshd behind QEMU shows as "Connection reset", not "refused", because
   QEMU's port forward accepts the connection. Confirmed live with `slay sshd`.
   "Connection refused" means QEMU itself is not running.
@@ -248,5 +261,7 @@ print the key.
 ### Open TODOs
 - Condvar coverage: about 38 mutex re-acquires per trace after
   `SYNC_CONDVAR_WAIT/82` are not evaluated, because no wait call matches them.
-- Pin the Python version in `action.yml`: it uses the runner's `python3`, kevlint
-  has only been tested on 3.12, and `--config` needs 3.11 or newer.
+- Other blocking lock states: `THRWLOCK_WRITE`/`READ` (`SYNC_RWLOCK/77`) and
+  `THMUON_MUTEX` are in real traces, and are neither evaluated nor counted as not
+  evaluated. Headers confirm they exist; their behavior is not documented here.
+- Memory: about 580 bytes per trace event in RSS (900 MB for a 1.5M-event 30 s trace).

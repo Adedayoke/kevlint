@@ -62,6 +62,12 @@ thread is not in a trace, that budget is `NOT EVALUATED` with a warning, or exit
 with `required = true`. The 100 ms in the sample suits the QEMU demos only: QEMU
 timing is not realistic, so set real budgets from traces of the real target.
 
+A block already in progress when the trace starts has no visible start. If it is
+over budget it is reported as "at least" its length so far, as with a block still open
+at the end of the trace; otherwise it is not evaluated. Choose budget threads with
+care: `THSEM` is also an idle wait for some workers. `softirq_0` in `io-sock`, for
+example, spends seconds in `THSEM` on an idle system.
+
 ## Capturing from a target
 
 `capture` records a trace on a QNX target, decodes it, and runs the normal check
@@ -90,10 +96,14 @@ takes `--config`, `--html`, `--explain` and `--debug`, as `check` does.
 - A workload that keeps running after the trace gets 30 seconds to finish, then is
   left running on the target with a warning.
 
-Two guards stop a trace without the workload from passing:
+Three guards stop a trace without the workload from passing:
 
 - **Workload ended early:** if the `--run` workload ends before tracing ends, the
   capture exits 2 and writes no files.
+- **Trace too short:** if the decoded trace covers under 90% of `--seconds`, the
+  capture exits 2 and writes no files. `tracelogger` exits 0 and prints nothing when
+  the disk it writes to fills, and the `.kev` just stops. Traces go to `/tmp`, so check
+  free space there on a busy system: one busy run wrote about 2 MB per second.
 - **Required thread missing:** with `--config`, a budget with `required = true`
   exits 2 if its thread is not in the trace. The sample `kevlint.toml` requires
   `fusion_rt`. This needs a config: without `--config`, only the first guard applies.
@@ -158,10 +168,11 @@ steps:
 |---|---|---|---|
 | `trace` | yes | | Path to `traceprinter` text output, captured with `tracelogger -w` |
 | `report` | no | `kevlint-report.html` | Where to write the HTML report |
+| `config` | no | | Optional `kevlint.toml` rules file. Without it, only priority-inversion runs |
 
 The action fails the job when the trace has violations and adds a results table
-to the job summary. It uses the runner's `python3`, and has been tested with
-Python 3.12.
+to the job summary. It installs and uses its own Python 3.12, and leaves the job's
+`python3` unchanged.
 
 ## This repository's CI
 
@@ -172,6 +183,9 @@ that file.
 
 ## Limitations
 
+- The rules look only at `THSEM` and `THMUTEX`. Time blocked in other lock states,
+  such as `THRWLOCK_WRITE` and `THMUON_MUTEX` (common in real traces, especially
+  `io-sock`), is neither checked nor counted as "not evaluated".
 - Running `tracelogger` above the workload's priority makes its own threads appear
   in the trace (it trips `no-semaphore-high-priority`), so `kevlint capture` runs it
   at default priority.
