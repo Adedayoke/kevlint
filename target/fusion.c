@@ -9,9 +9,16 @@
  *
  * rt and hog wait on pulses rather than semaphores, so the only semaphore rt
  * ever blocks on is the lock under test.
+ *
+ * --markers writes "lock taken" and "lock released" to kevlintd. Both are outside
+ * rt's block on purpose: a marker is a blocking message, and one written during
+ * the block would change the scheduling being measured. The hog writes none,
+ * because it only runs inside that block.
  */
 #include "kevdemo.h"
+#include "kevlintd.h"
 
+#include <fcntl.h>
 #include <semaphore.h>
 #include <sys/netmgr.h>
 
@@ -34,6 +41,13 @@ static enum mode mode = MODE_NORMAL;
 static sem_t lock_sem;
 static pthread_mutex_t lock_mutex;
 static struct gate rt_gate, hog_gate;
+static int marker_fd = -1;
+
+static void marker(const char *text)
+{
+    if (marker_fd != -1 && write(marker_fd, text, strlen(text)) == -1)
+        die(KEVLINT_MARKER_PATH);
+}
 
 static void lock_init(void)
 {
@@ -119,9 +133,11 @@ static void *holder_thread(void *arg)
     for (;;) {
         sleep_ms(CYCLE_MS);
         lock_take();
+        marker("lock taken");
         if (mode == MODE_NORMAL) {
             spin(HOLD_WORK);
             lock_give();
+            marker("lock released");
             gate_open(&rt_gate);
             gate_open(&hog_gate);
         } else {
@@ -129,6 +145,7 @@ static void *holder_thread(void *arg)
             gate_open(&hog_gate);
             spin(HOLD_WORK);
             lock_give();
+            marker("lock released");
         }
     }
     return NULL;
@@ -143,6 +160,11 @@ static void parse_mode(int argc, char **argv)
             inversion = 1;
         else if (strcmp(argv[i], "--fixed") == 0)
             fixed = 1;
+        else if (strcmp(argv[i], "--markers") == 0 && marker_fd == -1) {
+            marker_fd = open(KEVLINT_MARKER_PATH, O_WRONLY);
+            if (marker_fd == -1)
+                die(KEVLINT_MARKER_PATH);
+        }
     }
     if (inversion && fixed) {
         fprintf(stderr, "fusion: --inversion and --fixed are exclusive\n");
