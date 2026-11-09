@@ -29,7 +29,6 @@ COPY_TIMEOUT = 120
 CAPTURE_MARGIN = 60
 WORKLOAD_GRACE = 30
 MARK = "@kevlint "
-CANNOT_EXECUTE = ("126", "127")  # the shell's status for a command it could not run
 LOG_TAIL = 20
 DECODE_TIMEOUT = 120
 GIT_TIMEOUT = 10
@@ -298,10 +297,12 @@ def check_report(report):
             f"Check the --run command. Workload output:\n{log_tail(report.log)}"
         )
     finished = status.get("workload_status")
-    if finished in CANNOT_EXECUTE and status.get("alive_after_capture") == "0":
+    if status.get("alive_after_capture") == "0":
+        # A verdict on this trace could be a PASS on a trace without the workload.
         raise CaptureError(
-            f"the workload could not be started (exit status {finished}), so the trace would "
-            f"not contain it. Check the --run command. Workload output:\n{log_tail(report.log)}"
+            f"the workload ended before tracing ended (exit status {finished}), so the trace "
+            f"may not contain it and its verdict would mean nothing. Check the --run command, "
+            f"or make it outlast --seconds. Workload output:\n{log_tail(report.log)}"
         )
     traced = status.get("tracelogger_status")
     if traced is None:
@@ -316,8 +317,6 @@ def check_report(report):
         )
 
     warnings = []
-    if status.get("alive_after_capture") == "0":
-        warnings.append("the workload finished before tracing ended, so the trace only partly covers it")
     if finished == "running":
         warnings.append("the workload was still running after the capture and was left running on the target")
     elif finished not in (None, "0"):

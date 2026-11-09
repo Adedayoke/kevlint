@@ -138,7 +138,7 @@ class CommandsTest(FakeTargetCase):
         self.assertIsNone(json.loads(Path(self.prefix + ".json").read_text())["workload_command"])
 
     def test_workload_is_interpreted_only_by_the_target_shell(self):
-        run = """echo "a  b" 'c $d' $REMOTE_ONLY $(echo sub); echo ';|&' """
+        run = """echo "a  b" 'c $d' $REMOTE_ONLY $(echo sub); echo ';|&'; sleep 1"""
         done = self.capture(run=run, REMOTE_ONLY="seen")
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertIn("a  b c $d seen sub", done.stdout)
@@ -212,8 +212,12 @@ class FailureTest(FakeTargetCase):
 
     def test_workload_typo_is_not_a_pass_even_without_settling(self):
         done = self.capture(run="no_such_program_x", FAKE_FIXTURE=NORMAL)
-        self.assert_failed(done, "could not be started")
+        self.assert_failed(done, "before tracing")
         self.assertIn("no_such_program_x", done.stderr)
+
+    def test_workload_ending_during_the_trace_is_not_a_pass(self):
+        done = self.capture(run="true", FAKE_FIXTURE=NORMAL)
+        self.assert_failed(done, "before tracing")
 
     def test_workload_gone_before_tracing_is_not_a_pass(self):
         args = ["capture", "--seconds", "3", "--settle", "1", "--out", self.prefix]

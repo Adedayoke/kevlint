@@ -92,14 +92,20 @@ class ReportTest(unittest.TestCase):
         with self.assertRaisesRegex(CaptureError, "no events"):
             check_report(report)
 
-    def test_warnings(self):
+    def test_workload_ending_during_the_trace_is_an_error(self):
         report = parse_report(
             "@kevlint tracelogger_status 0\n@kevlint kev_present 1\n"
-            "@kevlint alive_after_capture 0\n@kevlint workload_status 4\n"
+            "@kevlint alive_after_capture 0\n@kevlint workload_status 0\n"
         )
-        warnings = check_report(report)
-        self.assertTrue(any("partly covers" in w for w in warnings))
-        self.assertTrue(any("status 4" in w for w in warnings))
+        with self.assertRaisesRegex(CaptureError, "before tracing ended"):
+            check_report(report)
+
+    def test_nonzero_exit_after_the_trace_only_warns(self):
+        report = parse_report(
+            "@kevlint tracelogger_status 0\n@kevlint kev_present 1\n"
+            "@kevlint alive_after_capture 1\n@kevlint workload_status 4\n"
+        )
+        self.assertTrue(any("status 4" in w for w in check_report(report)))
 
     def test_clean_run_has_no_warnings(self):
         report = parse_report(
