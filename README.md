@@ -62,11 +62,35 @@ thread is not in a trace, that budget is `NOT EVALUATED` with a warning, or exit
 with `required = true`. The 50 ms in the sample suits the QEMU demos only: QEMU
 timing is not realistic, so set real budgets from traces of the real target.
 
+## Capturing from a target
+
+`capture` records a trace on a QNX target, decodes it, and runs the normal check
+with the same exit status. It needs `source ~/qnx800/qnxsdp-env.sh` first, for
+`traceprinter`, and an ssh key that logs in to the target without a prompt.
+
+```sh
+PYTHONPATH=host python3 -m kevlint capture --seconds 3 --out fixtures/name \
+  --run 'cd /tmp/kevdemo; ./control -d 8 & ./fusion --inversion -d 8 & ./sensor -d 8 & wait'
+```
+
+It writes `name.kev`, `name.txt` and `name.json` (how the trace was made), and only
+if every step succeeds. Existing files are kept unless you pass `--force`. It also
+takes `--config`, `--html`, `--explain` and `--debug`, as `check` does.
+
+- **Target:** `--target user@host[:port]`, else `KEVLINT_TARGET`, else
+  `root@localhost:2222`. A target given without a port uses port 22.
+- **Workload:** `--run` is a shell command run by the target's shell. It starts
+  `--settle` seconds (default 2) before tracing. It must outlast `--seconds`: if it
+  ends before tracing ends, the capture exits 2 rather than judge a trace that may
+  not contain it. A command with `&` should end in `wait`.
+- A workload that keeps running after the trace gets 30 seconds to finish, then is
+  left running on the target with a warning.
+
 | Exit status | Meaning |
 |---|---|
 | 0 | No violations |
 | 1 | At least one violation |
-| 2 | A trace, list, config or output file could not be used, or a required thread is missing |
+| 2 | A trace, list, config or output file could not be used, a capture failed, or a required thread is missing |
 
 ## GitHub Action
 

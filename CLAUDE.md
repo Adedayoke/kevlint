@@ -56,6 +56,9 @@ found.
 - Optional `--explain` on `check` and `check-all` (`explain.py`, `llm.py`):
   AI-generated explanations in the terminal and HTML report only, not in the
   Markdown summary or CI. `--debug` logs a retry without the seed to stderr.
+- `kevlint capture` (`capture.py`): traces on the target over the system ssh and
+  scp, decodes on the host, writes `name.kev`, `.txt`, `.json`, then runs the normal
+  check. Tests use `host/tests/fake_target.py`.
 - Demo PR #1 (`demo/introduce-inversion`) is red on purpose. It must NEVER be
   merged: it would turn `main` red.
 
@@ -114,6 +117,23 @@ found.
 - A block already in progress when the trace starts has no visible start, so it
   cannot be measured. The report says so.
 
+### Capture
+- The verdict comes from the normal check, so exit codes match `check`. Every
+  capture failure exits 2, and nothing reaches the `--out` paths unless every step
+  succeeded.
+- A workload that ends before tracing ends is an error, not a warning. A live run
+  traced an idle system and printed PASS: the trace had no fusion events. The cause
+  is unknown (possibly uneven QEMU timing after idle). Four repeats gave FAIL.
+- The demo's real-time threads can starve the shell, so `--settle` and `sleep` are
+  only approximate under load.
+- A non-zero workload exit after the trace is a warning, recorded in `name.json`.
+- A stopped sshd behind QEMU shows as "Connection reset", not "refused", because
+  QEMU's port forward accepts the connection. Confirmed live with `slay sshd`.
+  "Connection refused" means QEMU itself is not running.
+- `run_demo.sh` cannot be a `--run` workload: it starts its own `tracelogger`.
+- Verdict reproduction is structural (exit status and the threads involved), since
+  violation counts can vary between runs.
+
 ### `--explain` design
 - Never affects the verdict: explanations run after it is printed, and any
   failure becomes a note. Without the three `KEVLINT_LLM_*` vars it prints one
@@ -162,9 +182,10 @@ PYTHONPATH=host python3 -m kevlint check <trace.txt> --html <report.html>
 PYTHONPATH=host python3 -m kevlint check-all ci/traces.txt --reports-dir reports
 PYTHONPATH=host python3 -m kevlint check <trace.txt> --config kevlint.toml --html <report.html>
 . ~/.kevlint_env; PYTHONPATH=host python3 -m kevlint check <trace.txt> --explain
+source ~/qnx800/qnxsdp-env.sh; PYTHONPATH=host python3 -m kevlint capture --seconds 3 --out <prefix> --run '<cmd>'
 ```
 Exit status: 0 no violations, 1 violations, 2 a trace, list, config or output file
-could not be used, or a required thread is missing. Only `python3` exists on this
+could not be used, a capture failed, or a required thread is missing. Only `python3` exists on this
 machine. The LLM vars load only in
 interactive shells, so other shells must source `~/.kevlint_env` first. Never
 print the key.
