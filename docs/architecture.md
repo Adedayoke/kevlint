@@ -17,7 +17,7 @@ flowchart TD
         kernel -->|"trace events"| tracelogger
     end
 
-    subgraph host["Host: Python standard library"]
+    subgraph host["Host (Python)"]
         capture["kevlint capture: ssh, scp, traceprinter"]
         committed["Committed traceprinter text"]
         parser["parser"]
