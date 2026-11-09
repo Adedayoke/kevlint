@@ -11,6 +11,7 @@ PASS = "\u2705 PASS"
 FAIL = "\u274c FAIL"
 ERROR = "\u26a0\ufe0f ERROR"
 WARNING_SIGN = "\u26a0\ufe0f"
+INFO_SIGN = "\u2139\ufe0f"
 
 
 @dataclass
@@ -52,6 +53,8 @@ def _coverage(result):
             f" {WARNING_SIGN} a not-evaluated block has higher priority "
             f"({result.not_evaluated_max_priority})"
         )
+    if result.kernel_note is not None:
+        line += f" {INFO_SIGN} {_cell(result.kernel_note)}"
     return line
 
 
@@ -90,6 +93,7 @@ STATUS_TEXT = {
 
 def _rule_coverage(rule):
     notes = [f"{WARNING_SIGN} {text}" for text in rule.errors + rule.warnings]
+    notes += [f"{INFO_SIGN} {text}" for text in rule.notes]
     return " ".join([rule.coverage, *notes])
 
 

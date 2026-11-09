@@ -86,6 +86,7 @@ class RuleResult:
     not_evaluated: Counter
     worst_ms: float = None
     warnings: list = field(default_factory=list)
+    notes: list = field(default_factory=list)
     errors: list = field(default_factory=list)
     budgets: list = field(default_factory=list)
     inversion: object = None
@@ -261,6 +262,8 @@ def _inversion_rule(trace, config):
             f"a not-evaluated block has priority {result.not_evaluated_max_priority}, "
             "higher than every evaluated waiter"
         )
+    if result.kernel_note is not None:
+        rule.notes.append(result.kernel_note)
     return rule
 
 

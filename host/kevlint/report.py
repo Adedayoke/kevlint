@@ -850,6 +850,20 @@ def coverage_warning(result):
     )
 
 
+def info_note(text):
+    """A plain note, styled apart from warnings: it does not need action."""
+    return f'<p class="note" style="margin-top:12px"><strong>Note:</strong> {esc(text)}</p>'
+
+
+def kernel_note_html(result):
+    return "" if result.kernel_note is None else info_note(result.kernel_note)
+
+
+def kernel_priority_text(result):
+    block = result.kernel_block
+    return "" if block is None else f" (kernel-internal: <b>{block.priority}</b>)"
+
+
 def coverage_card(result):
     skipped = sum(result.not_evaluated.values())
     excluded = result.excluded
@@ -890,8 +904,8 @@ def coverage_card(result):
   </div>{meter_key}
   {reasons_html}
   <div class="priorities">Highest waiter priority:
-  <b>{priority_text(checked)}</b> evaluated, <b>{priority_text(unchecked)}</b> not evaluated</div>
-  {coverage_warning(result)}
+  <b>{priority_text(checked)}</b> evaluated, <b>{priority_text(unchecked)}</b> not evaluated{kernel_priority_text(result)}</div>
+  {coverage_warning(result)}{kernel_note_html(result)}
 </section>"""
 
 
@@ -1014,8 +1028,10 @@ def rule_coverage(rule):
 
 
 def rule_alerts(rule):
-    return "".join(alert("Error:", text) for text in rule.errors) + "".join(
-        alert("Warning:", text) for text in rule.warnings
+    return (
+        "".join(alert("Error:", text) for text in rule.errors)
+        + "".join(alert("Warning:", text) for text in rule.warnings)
+        + "".join(info_note(text) for text in rule.notes)
     )
 
 
