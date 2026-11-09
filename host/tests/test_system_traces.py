@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+from kevlint.capture import check_span, trace_span, CaptureError
 from kevlint.config import Budget, Config
 from kevlint.inversion import _qualifying_runs, _scan, check
 from kevlint.parser import Event, Trace, parse_trace
@@ -180,6 +181,21 @@ class WindowTest(unittest.TestCase):
                 inside = [r for r in runs if block.index < r.index < block.end_index]
                 want = list(_qualifying_runs(block, inside, [r.index for r in inside], history))
                 self.assertEqual(list(_qualifying_runs(block, runs, indices, history)), want)
+
+
+class CaptureSpanTest(unittest.TestCase):
+    def test_span_of_a_real_three_second_trace(self):
+        self.assertAlmostEqual(trace_span(FIXTURES / "demo_fixed.txt"), 3.0, delta=0.1)
+
+    def test_real_traces_are_not_rejected_as_short(self):
+        check_span(FIXTURES / "demo_normal.txt", "3")
+        check_span(FIXTURES / "system_idle.txt", "5")
+
+    def test_short_trace_says_what_to_check(self):
+        with self.assertRaises(CaptureError) as caught:
+            check_span(FIXTURES / "system_idle.txt", "30")
+        self.assertIn("covers only", str(caught.exception))
+        self.assertIn("df -h /tmp", str(caught.exception))
 
 
 if __name__ == "__main__":

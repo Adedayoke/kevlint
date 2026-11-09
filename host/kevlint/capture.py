@@ -31,6 +31,7 @@ WORKLOAD_GRACE = 30
 MARK = "@kevlint "
 LOG_TAIL = 20
 DECODE_TIMEOUT = 120
+MIN_SPAN_FRACTION = 0.9
 GIT_TIMEOUT = 10
 START_SSHD = "sh /data/home/root/start_ssh.sh"
 KEVLINTD_STATUS = "/dev/kevlint/status"
@@ -368,6 +369,38 @@ def decode(kev, txt):
             )
 
 
+def trace_span(txt):
+    """Seconds between the first and last events of decoded text, or None if unknown."""
+    rate = first = last = None
+    with open(txt, encoding="utf-8", errors="replace") as lines:
+        for line in lines:
+            if line.startswith("t:0x"):
+                cycles = int(line[4:].split(" ", 1)[0], 16)
+                first = cycles if first is None else first
+                last = cycles
+            elif first is None and "TRACE_CYCLES_PER_SEC::" in line:
+                rate = int(line.partition("::")[2])
+    if rate is None or first is None:
+        return None
+    return (last - first) / rate
+
+
+def check_span(txt, seconds):
+    """Reject a trace much shorter than requested.
+
+    tracelogger exits 0 with no message when its output disk fills, and the .kev
+    just stops, so its exit status cannot be relied on for this.
+    """
+    span = trace_span(txt)
+    if span is not None and span < float(seconds) * MIN_SPAN_FRACTION:
+        raise CaptureError(
+            f"the trace covers only {span:.2f} s of the {seconds} s requested, so its verdict "
+            "would cover less than you asked for. tracelogger stops without an error when its "
+            "output disk fills: check free space with df -h /tmp on the target, or shorten "
+            "--seconds."
+        )
+
+
 def git_info():
     """Return (commit, dirty) for kevlint's own source, or (None, None)."""
     source = os.path.dirname(os.path.abspath(__file__))
@@ -463,6 +496,7 @@ def capture(options, environ=None):
         print("kevlint capture: copying and decoding the trace", flush=True)
         session.copy(kev, local["kev"])
         decode(local["kev"], local["txt"])
+        check_span(local["txt"], options.seconds)
         with open(local["json"], "w", encoding="utf-8") as out:
             json.dump(metadata(options, target, kev, report, kevlintd_status), out, indent=2)
             out.write("\n")
