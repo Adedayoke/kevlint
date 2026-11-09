@@ -142,6 +142,17 @@ found.
   under a sender. `alarm` at `-d` + 5 s is only a backstop for a stuck run. The stop is
   a flag set by `sensor_timer`, because under QEMU the pipeline overloads and the
   senders' schedule falls behind real time.
+- The demo's default `-d` is 30 s, so captures can omit it. It must stay under capture's
+  30 s grace after tracing. A 3 s trace ended up to +10 s after launch under load.
+- Capture runs its steps at the default priority, on purpose. Tested 2026-11-09 with
+  `on -p 60` (81 captures, default vs raised):
+  - In the two rejected captures, tracing started on time (+2, +3 s) and ended late (+9 s),
+    so the rejection is a late finish, not a late start.
+  - tracelogger above 50 finished on time (at most +6 s), but its own threads block on
+    semaphores at that priority, so `no-semaphore-high-priority` failed every run.
+  - Raising only the shell steps showed no clear benefit (it ended as late as +10 s).
+  - An earlier batch rejected 9 of 12 at `-d 8`; a later one rejected 2 of 36. Why it
+    changed is unknown.
 
 ### kevlintd and markers
 - User string events lose their text at lengths that are multiples of 8 and are cut
@@ -226,6 +237,7 @@ PYTHONPATH=host python3 -m kevlint check-all ci/traces.txt --reports-dir reports
 PYTHONPATH=host python3 -m kevlint check <trace.txt> --config kevlint.toml --html <report.html>
 . ~/.kevlint_env; PYTHONPATH=host python3 -m kevlint check <trace.txt> --explain
 source ~/qnx800/qnxsdp-env.sh; PYTHONPATH=host python3 -m kevlint capture --seconds 3 --out <prefix> --run '<cmd>'
+source ~/qnx800/qnxsdp-env.sh; PYTHONPATH=host python3 -m kevlint capture --seconds 3 --out <prefix> --config kevlint.toml --run 'cd /tmp/kldev; ./control & ./fusion --inversion & ./sensor & wait'
 ```
 Exit status: 0 no violations, 1 violations, 2 a trace, list, config or output file
 could not be used, a capture failed, or a required thread is missing. Only `python3` exists on this

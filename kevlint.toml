@@ -3,7 +3,7 @@
 # The 100 ms budget suits these QEMU demos only. QEMU timing is not realistic, so
 # set budgets for a real product from traces captured on the real target. With
 # priority inheritance, demo blocks reached about 65 ms under load; inversion
-# blocks ran from over 100 ms to about 580 ms.
+# blocks ran from over 100 ms to about 600 ms.
 
 [rules.priority-inversion]
 enabled = true

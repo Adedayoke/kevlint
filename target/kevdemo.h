@@ -104,6 +104,11 @@ static inline void sleep_ms(unsigned ms)
     sleep_until_ns(now_ns() + (uint64_t)ms * 1000000u);
 }
 
+/* Default -d. Under QEMU load a 3 s capture ended up to 10 s after launch, and a workload
+ * that ends first gets the capture rejected. Must stay under capture's 30 s wait after tracing.
+ */
+#define DEFAULT_DURATION_S 30u
+
 /* How long past -d the alarm backstop waits. Well beyond a normal shutdown. */
 #define BACKSTOP_EXTRA_S 5u
 
@@ -117,7 +122,7 @@ static inline void sleep_ms(unsigned ms)
  */
 static inline unsigned arm_backstop(int argc, char **argv)
 {
-    unsigned seconds = 10;
+    unsigned seconds = DEFAULT_DURATION_S;
     int i;
 
     for (i = 1; i + 1 < argc; i++)

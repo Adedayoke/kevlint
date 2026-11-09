@@ -70,8 +70,12 @@ with the same exit status. It needs `source ~/qnx800/qnxsdp-env.sh` first, for
 
 ```sh
 PYTHONPATH=host python3 -m kevlint capture --seconds 3 --out fixtures/name \
-  --run 'cd /tmp/kevdemo; ./control -d 8 & ./fusion --inversion -d 8 & ./sensor -d 8 & wait'
+  --run 'cd /tmp/kevdemo; ./control & ./fusion --inversion & ./sensor & wait'
 ```
+
+The demo programs run for 30 seconds unless given `-d SECONDS`, so a capture of them
+takes about that long. Under load on QEMU, a 3-second trace finished up to 10 seconds
+after the workload started, so a short `-d` can get the capture rejected.
 
 It writes `name.kev`, `name.txt` and `name.json` (how the trace was made), and only
 if every step succeeds. Existing files are kept unless you pass `--force`. It also
