@@ -26,6 +26,7 @@
 #define PRIO_SENSOR_B    12
 #define PRIO_FUSION      15
 #define PRIO_CONTROL     20
+#define PRIO_TIMER       25
 #define PRIO_HOLDER      10
 #define PRIO_HOG         30
 #define PRIO_RT          50
@@ -103,11 +104,18 @@ static inline void sleep_ms(unsigned ms)
     sleep_until_ns(now_ns() + (uint64_t)ms * 1000000u);
 }
 
-/* Each process ends itself with alarm(), so captures need no cleanup.
- * TODO: clean up the MsgSend errors printed at shutdown, when one process's
- * alarm expires before its peers'. They occur after the capture window.
+/* How long past -d the alarm backstop waits. Well beyond a normal shutdown. */
+#define BACKSTOP_EXTRA_S 5u
+
+/* Shutdown follows the pipeline, so no server exits while a client still needs it:
+ * sensor stops at -d seconds and exits, then fusion and control each exit when
+ * their only client disconnects (server_receive).
+ *
+ * The alarm is only a backstop for a stuck run, so captures still need no cleanup.
+ * It is deliberately left at its default action: a stuck run should end loudly.
+ * Returns the -d duration in seconds.
  */
-static inline void arm_duration(int argc, char **argv)
+static inline unsigned arm_backstop(int argc, char **argv)
 {
     unsigned seconds = 10;
     int i;
@@ -115,7 +123,8 @@ static inline void arm_duration(int argc, char **argv)
     for (i = 1; i + 1 < argc; i++)
         if (strcmp(argv[i], "-d") == 0)
             seconds = (unsigned)strtoul(argv[i + 1], NULL, 10);
-    alarm(seconds);
+    alarm(seconds + BACKSTOP_EXTRA_S);
+    return seconds;
 }
 
 static inline int connect_retry(const char *name)
@@ -133,7 +142,10 @@ static inline int connect_retry(const char *name)
     return -1;
 }
 
-/* Returns the rcvid of the next sample, handling name_attach housekeeping. */
+/* Returns the rcvid of the next sample, handling name_attach housekeeping, or 0
+ * once the client has disconnected. Each server has one client process, and that
+ * client only disconnects by exiting, with no sample left waiting for a reply.
+ */
 static inline rcvid_t server_receive(int chid, union rx *m)
 {
     for (;;) {
@@ -142,8 +154,10 @@ static inline rcvid_t server_receive(int chid, union rx *m)
         if (rcvid == -1)
             die("MsgReceive");
         if (rcvid == 0) {
-            if (m->pulse.code == _PULSE_CODE_DISCONNECT)
+            if (m->pulse.code == _PULSE_CODE_DISCONNECT) {
                 ConnectDetach(m->pulse.scoid);
+                return 0;
+            }
             continue;
         }
         if (m->type == _IO_CONNECT) {

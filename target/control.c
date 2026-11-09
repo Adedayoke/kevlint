@@ -7,7 +7,7 @@ int main(int argc, char **argv)
 {
     name_attach_t *attach;
 
-    arm_duration(argc, argv);
+    arm_backstop(argc, argv);
     setup_self("control_server", PRIO_CONTROL, CPU_PIPELINE);
     attach = name_attach(NULL, CONTROL_NAME, 0);
     if (attach == NULL)
@@ -16,6 +16,8 @@ int main(int argc, char **argv)
         union rx m;
         rcvid_t rcvid = server_receive(attach->chid, &m);
 
+        if (rcvid == 0)
+            break;
         spin(CONTROL_WORK);
         if (MsgReply(rcvid, EOK, NULL, 0) == -1)
             die("MsgReply");

@@ -14,6 +14,11 @@ struct sender_cfg {
     uint64_t offset_ns;
 };
 
+/* Set once at the deadline. A flag, not a time check in the loop: it adds no kernel
+ * call to the trace, and `next` falls behind real time when the pipeline is overloaded.
+ */
+static volatile int stop;
+
 static void *sender(void *arg)
 {
     const struct sender_cfg *c = arg;
@@ -24,7 +29,7 @@ static void *sender(void *arg)
     setup_self(c->name, c->prio, CPU_PIPELINE);
     coid = connect_retry(FUSION_NAME);
     next = (now_ns() / PERIOD_NS + 1) * PERIOD_NS + c->offset_ns;
-    for (;;) {
+    while (!stop) {
         struct sample s = { MSG_SAMPLE, c->source, seq++ };
 
         sleep_until_ns(next);
@@ -41,9 +46,15 @@ int main(int argc, char **argv)
     static const struct sender_cfg b = { "sensor_b", PRIO_SENSOR_B, 2, 2000000u };
     pthread_t ta, tb;
 
-    arm_duration(argc, argv);
+    uint64_t deadline = now_ns() + (uint64_t)arm_backstop(argc, argv) * 1000000000u;
+
     check(pthread_create(&ta, NULL, sender, (void *)&a), "pthread_create");
     check(pthread_create(&tb, NULL, sender, (void *)&b), "pthread_create");
+    /* Above the pipeline, so an overloaded pipeline cannot delay the stop. */
+    setup_self("sensor_timer", PRIO_TIMER, CPU_PIPELINE);
+    sleep_until_ns(deadline);
+    stop = 1;
     pthread_join(ta, NULL);
+    pthread_join(tb, NULL);
     return 0;
 }

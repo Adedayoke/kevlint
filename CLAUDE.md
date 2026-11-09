@@ -136,6 +136,11 @@ found.
 - `run_demo.sh` cannot be a `--run` workload: it starts its own `tracelogger`.
 - Verdict reproduction is structural (exit status and the threads involved), since
   violation counts can vary between runs.
+- The demo shuts down along the pipeline: `sensor` stops at `-d` seconds, then `fusion`
+  and `control` each exit on their client's disconnect pulse, so a server never dies
+  under a sender. `alarm` at `-d` + 5 s is only a backstop for a stuck run. The stop is
+  a flag set by `sensor_timer`, because under QEMU the pipeline overloads and the
+  senders' schedule falls behind real time.
 
 ### kevlintd and markers
 - User string events lose their text at lengths that are multiples of 8 and are cut
@@ -228,7 +233,6 @@ interactive shells, so other shells must source `~/.kevlint_env` first. Never
 print the key.
 
 ### Open TODOs
-- Clean up the `MsgSend` errors printed at demo shutdown (see `target/kevdemo.h`).
 - Condvar coverage: about 38 mutex re-acquires per trace after
   `SYNC_CONDVAR_WAIT/82` are not evaluated, because no wait call matches them.
 - Pin the Python version in `action.yml`: it uses the runner's `python3`, kevlint

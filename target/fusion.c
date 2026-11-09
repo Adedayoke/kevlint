@@ -180,7 +180,7 @@ int main(int argc, char **argv)
     int control;
 
     parse_mode(argc, argv);
-    arm_duration(argc, argv);
+    arm_backstop(argc, argv);
     lock_init();
     gate_init(&rt_gate, PRIO_RT);
     gate_init(&hog_gate, PRIO_HOG);
@@ -197,6 +197,8 @@ int main(int argc, char **argv)
         union rx m;
         rcvid_t rcvid = server_receive(attach->chid, &m);
 
+        if (rcvid == 0)
+            break;
         spin(FUSION_WORK);
         if (MsgSend(control, &m.sample, sizeof m.sample, NULL, 0) == -1)
             die("MsgSend");
