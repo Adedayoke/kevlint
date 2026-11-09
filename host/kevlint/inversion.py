@@ -10,7 +10,7 @@ block with no visible release cannot be evaluated and is counted separately.
 The release can be logged just before the block: with the holder on another CPU,
 its unlock can land between the waiter's lock call and the waiter's THMUTEX event.
 """
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
@@ -262,11 +262,11 @@ def _ready_before(history, thread, run_index):
     return None
 
 
-def _qualifying_runs(block, runs, history):
+def _qualifying_runs(block, runs, run_indices, history):
     """Yield (run, holder priority) for each run that makes the block a violation."""
-    for run in runs:
-        if not block.index < run.index < block.end_index:
-            continue
+    first = bisect_right(run_indices, block.index)
+    last = bisect_left(run_indices, block.end_index)
+    for run in runs[first:last]:
         if run.thread in (block.waiter, block.holder):
             continue
         holder_priority = _holder_priority(history, block, run.index)
@@ -278,7 +278,7 @@ def _qualifying_runs(block, runs, history):
             yield run, holder_priority
 
 
-def _evaluate(block, runs, history, trace):
+def _evaluate(block, runs, run_indices, history, trace):
     """Return the Violation for one evaluable block, or None."""
     waiter_priority = block.start.priority
     last_cycles = trace.events[-1].cycles
@@ -287,7 +287,7 @@ def _evaluate(block, runs, history, trace):
     first_run = {}
     lowest_holder = {}
 
-    for run, holder_priority in _qualifying_runs(block, runs, history):
+    for run, holder_priority in _qualifying_runs(block, runs, run_indices, history):
         end = min(run.end_cycles or last_cycles, block.end.cycles)
         time_total[run.thread] += max(end - run.event.cycles, 0)
         first_run.setdefault(run.thread, run)
@@ -420,6 +420,7 @@ def _higher(current, priority):
 def check(trace, min_waiter_priority=None):
     """Run the rule. Waiters below min_waiter_priority are counted as excluded."""
     blocks, runs, history = _scan(trace)
+    run_indices = [run.index for run in runs]
     violations = []
     evaluated = 0
     not_evaluated = Counter()
@@ -449,7 +450,7 @@ def check(trace, min_waiter_priority=None):
             continue
         evaluated += 1
         evaluated_max = _higher(evaluated_max, block.start.priority)
-        violation = _evaluate(block, runs, history, trace)
+        violation = _evaluate(block, runs, run_indices, history, trace)
         if violation is not None:
             violations.append(violation)
             continue

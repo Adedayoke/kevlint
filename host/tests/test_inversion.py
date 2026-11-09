@@ -203,7 +203,7 @@ class MiddleMustDelayHolderTest(unittest.TestCase):
             and 10 < r.priority < 50
         ]
         self.assertTrue(in_priority_window, "fixture should have such runs")
-        counted = {r.thread for b in blocks for r, _ in _qualifying_runs(b, runs, history)}
+        counted = {r.thread for b in blocks for r, _ in _qualifying_runs(b, runs, [r.index for r in runs], history)}
         self.assertFalse(counted & pipeline)
 
     def test_middle_moved_to_another_cpu_stops_counting(self):

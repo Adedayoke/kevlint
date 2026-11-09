@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from kevlint.config import Budget, Config
-from kevlint.inversion import _scan, check
+from kevlint.inversion import _qualifying_runs, _scan, check
 from kevlint.parser import Event, Trace, parse_trace
 from kevlint.report import markers
 from kevlint.rules import STARTED_WITHIN_BUDGET, collect_waits, run_rules
@@ -166,6 +166,20 @@ class BlockedBeforeTheTraceTest(unittest.TestCase):
             self.assertEqual(done.returncode, 1, done.stderr)
             self.assertIn("at least 4991.486 ms (blocked for the whole trace)", done.stdout)
             self.assertIn("blocked for the whole trace", report.read_text(encoding="utf-8"))
+
+
+class WindowTest(unittest.TestCase):
+    def test_only_runs_inside_the_block_are_considered(self):
+        for name in ("demo_inversion", "system_busy"):
+            trace = fixture(name)
+            blocks, runs, history = _scan(trace)
+            indices = [r.index for r in runs]
+            for block in blocks:
+                if block.end is None or block.holder is None:
+                    continue
+                inside = [r for r in runs if block.index < r.index < block.end_index]
+                want = list(_qualifying_runs(block, inside, [r.index for r in inside], history))
+                self.assertEqual(list(_qualifying_runs(block, runs, indices, history)), want)
 
 
 if __name__ == "__main__":
