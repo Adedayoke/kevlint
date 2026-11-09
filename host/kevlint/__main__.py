@@ -17,6 +17,7 @@ from pathlib import Path
 from .capture import CaptureError, Options, capture
 from .config import NO_SEMAPHORE, ConfigError
 from .config import load_config as load_rules_config
+from . import usermarks
 from .explain import Explainer, print_explanations
 from .inversion import BELOW_MINIMUM, HOLDER_NOTE, boost_text, check
 from .llm import LlmClient, load_config
@@ -68,6 +69,37 @@ def resolved_line(trace, result):
     return line
 
 
+def print_marker_context(trace, start_cycles, end_cycles, indent, out):
+    """Print the markers around a block, if the trace has any."""
+    if not trace.markers:
+        return
+    nearest = usermarks.before(trace, start_cycles)
+    if nearest is None:
+        print(f"{indent}marker: none before this block", file=out)
+    else:
+        millis = (start_cycles - nearest.cycles) * 1000 / trace.cycles_per_sec
+        print(
+            f'{indent}marker: nearest before the block is "{nearest.text}" from '
+            f"{trace.describe(nearest.thread)}, {millis:.3f} ms before it, "
+            f"line {nearest.line} [{usermarks.CONTEXT_NOTE}]",
+            file=out,
+        )
+    if end_cycles is not None:
+        inside = usermarks.between(trace, start_cycles, end_cycles)
+        if inside:
+            lines = ", ".join(str(m.line) for m in inside)
+            print(f"{indent}markers during the block: {len(inside)} (lines {lines})", file=out)
+
+
+def print_marker_count(trace, out):
+    """Print how many markers the trace has. Traces without any print nothing."""
+    if trace.markers or trace.undecoded_markers:
+        undecoded = (
+            f", {trace.undecoded_markers} could not be decoded" if trace.undecoded_markers else ""
+        )
+        print(f"markers: {len(trace.markers)} in trace{undecoded}", file=out)
+
+
 def inversion_details(trace, result, out):
     """Print each violation, then the rule's counts and coverage."""
     total = len(result.violations)
@@ -98,10 +130,13 @@ def inversion_details(trace, result, out):
             f"block end {v.block_end_line}",
             file=out,
         )
+        print_marker_context(trace, v.start_cycles, v.end_cycles, "  ", out)
 
     skipped = sum(result.not_evaluated.values())
     if result.resolved:
         print(f"\n{resolved_line(trace, result)}", file=out)
+        worst = max(result.resolved, key=lambda r: r.duration_cycles)
+        print_marker_context(trace, worst.start_cycles, worst.end_cycles, "  ", out)
     print(f"\n{total} violation(s)", file=out)
     excluded = f", {result.excluded} excluded by config" if result.excluded else ""
     print(
@@ -120,6 +155,7 @@ def inversion_details(trace, result, out):
 def report(path, trace, result, out):
     print(f"kevlint check: {path}", file=out)
     print("rule: priority-inversion", file=out)
+    print_marker_count(trace, out)
     inversion_details(trace, result, out)
     total = len(result.violations)
     skipped = sum(result.not_evaluated.values())
@@ -155,6 +191,7 @@ def print_finding(trace, label, number, total, finding, out):
             file=out,
         )
     print(f"    lines:   {line_text(finding.lines)}", file=out)
+    print_marker_context(trace, finding.start_cycles, finding.end_cycles, "    ", out)
 
 
 def print_budget_rows(rule, out):
@@ -171,6 +208,7 @@ def print_budget_rows(rule, out):
 def report_rules(path, trace, rules, config, out):
     print(f"kevlint check: {path}", file=out)
     print(f"config: {config.path}", file=out)
+    print_marker_count(trace, out)
     if config.disabled:
         print(f"not enabled: {', '.join(config.disabled)}", file=out)
 

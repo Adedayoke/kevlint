@@ -23,6 +23,7 @@ from .rules import (
     root_causes,
 )
 from .timeline import BLOCKED, READY, RUNNING, thread_segments
+from . import usermarks
 
 WIDTH = 1000
 LEFT = 176
@@ -45,6 +46,19 @@ CSP = (
 )
 
 # Only reports with explanations carry this, so other reports stay unchanged.
+USER_MARK_BAND = 30
+MAX_USER_MARKS = 8
+
+USER_MARKS_CSS = """
+.timeline .user-mark { stroke: var(--running); stroke-width: 1.5; stroke-dasharray: 2 3; }
+.timeline .user-box { fill: var(--running); }
+.timeline .user-letter { fill: var(--surface); font-size: 11px; font-weight: 700; text-anchor: middle; }
+.user-marks { display: grid; gap: 6px; }
+.user-marks small { color: var(--muted); font-weight: 400; }
+.user-marks p { margin: 0; }
+.markers .user-letter { background: var(--running); border-radius: 3px; color: var(--surface); }
+"""
+
 EXPLANATION_CSS = """
 .ai { padding: 10px 12px; border: 1px dashed var(--axis); border-left: 3px solid var(--warning); border-radius: 6px; }
 .ai-label { font-weight: 600; }
@@ -389,16 +403,42 @@ def badge_positions(true_xs):
     return positions
 
 
-def timeline_svg(trace, violation, lanes, marker_list, priority_roles=()):
-    scale = Scale(trace, violation.start_cycles, violation.end_cycles)
+def lettered_marks(trace, window):
+    """Pair the first few markers in the view with the letters drawn for them."""
+    marks = usermarks.within(trace, *window)[:MAX_USER_MARKS]
+    return [(chr(ord("A") + index), mark) for index, mark in enumerate(marks)]
+
+
+def user_marks_svg(trace, lettered, scale, bottom):
+    """Draw one letter below the axis, and a line up through the lanes, per marker."""
+    label_y = bottom + AXIS_HEIGHT + 10
+    parts = []
+    positions = badge_positions([scale.x(mark.cycles) for _, mark in lettered])
+    for (letter, mark), box_x in zip(lettered, positions):
+        x = scale.x(mark.cycles)
+        tip = esc(f'"{mark.text}" from {trace.describe(mark.thread)}, line {mark.line}')
+        parts.append(
+            f'<line class="user-mark" x1="{x:.1f}" x2="{x:.1f}" y1="{TOP - 8}" y2="{bottom}"/>'
+            f'<line class="user-mark" x1="{x:.1f}" x2="{box_x:.1f}" y1="{bottom}" y2="{label_y}"/>'
+            f'<g class="seg" tabindex="0" data-tip="{tip}"><title>{tip}</title>'
+            f'<rect class="user-box" x="{box_x - 9:.1f}" y="{label_y}" width="18" height="18" rx="3"/>'
+            f'<text class="user-letter" x="{box_x:.1f}" y="{label_y + 13}">{letter}</text></g>'
+        )
+    return "".join(parts)
+
+
+def timeline_svg(trace, violation, lanes, marker_list, priority_roles=(), window=None):
+    start, end = window or (violation.start_cycles, violation.end_cycles)
+    scale = Scale(trace, start, end)
+    lettered = lettered_marks(trace, (start, end))
     bottom = TOP + len(lanes) * (LANE_HEIGHT + LANE_GAP) - LANE_GAP
-    height = bottom + AXIS_HEIGHT
+    height = bottom + AXIS_HEIGHT + (USER_MARK_BAND if lettered else 0)
     parts = [
         f'<svg class="timeline" viewBox="0 0 {WIDTH} {height}" role="img" '
         f'aria-label="State timeline of the worst block; the table below has the same data">'
     ]
 
-    span_ms = scale.ms(violation.end_cycles)
+    span_ms = scale.ms(end)
     step = nice_step(span_ms)
     tick = 0.0
     while tick <= span_ms + 1e-9:
@@ -432,6 +472,8 @@ def timeline_svg(trace, violation, lanes, marker_list, priority_roles=()):
             f'<circle class="badge" cx="{badge_x:.1f}" cy="11" r="9"/>'
             f'<text class="badge-n" x="{badge_x:.1f}" y="15">{number}</text>'
         )
+    if lettered:
+        parts.append(user_marks_svg(trace, lettered, scale, bottom))
     parts.append("</svg>")
     return "".join(parts)
 
@@ -492,6 +534,44 @@ def markers_html(marker_list):
         for number, label, _, line in marker_list
     )
     return f'<ol class="markers">{items}</ol>'
+
+
+def mark_position(mark, item, trace):
+    """Say where a marker falls relative to the block."""
+    if mark.cycles < item.start_cycles:
+        amount = brief_ms(item.start_cycles - mark.cycles, trace)
+        return f"{amount} before the block"
+    if mark.cycles > item.end_cycles:
+        return f"{brief_ms(mark.cycles - item.end_cycles, trace)} after the block"
+    return "during the block"
+
+
+def user_marks_html(item, trace, window):
+    """Describe the markers around a block. Empty for a trace without markers."""
+    if not trace.markers:
+        return ""
+    nearest = usermarks.before(trace, item.start_cycles)
+    nearest_text = "No marker before this block."
+    if nearest is not None:
+        nearest_text = (
+            f"Nearest marker before the block: <b>&quot;{esc(nearest.text)}&quot;</b> from "
+            f"{thread_html(trace, nearest.thread)}, {mark_position(nearest, item, trace)}, "
+            f"line {nearest.line}."
+        )
+    lettered = lettered_marks(trace, window)
+    rows = "".join(
+        f'<li><b class="user-letter">{letter}</b>&quot;{esc(mark.text)}&quot;, '
+        f"{mark_position(mark, item, trace)}, line {mark.line}</li>"
+        for letter, mark in lettered
+    )
+    total = len(usermarks.within(trace, *window))
+    more = f"<p><small>{total - len(lettered)} more in this view are not drawn.</small></p>" if total > len(lettered) else ""
+    listing = f'<ol class="markers">{rows}</ol>' if rows else ""
+    return (
+        '<div class="user-marks"><div class="eyebrow">Trace markers '
+        f"<small>{esc(usermarks.CONTEXT_NOTE)}</small></div>"
+        f"<p>{nearest_text}</p>{listing}{more}</div>"
+    )
 
 
 def segments_table(lanes, scale, trace):
@@ -589,15 +669,16 @@ def explanation_html(explanation):
 
 def pattern_card(pattern, trace, explanation=None):
     worst = pattern.worst
+    window = usermarks.view_window(trace, worst.start_cycles, worst.end_cycles)
     lanes = [
-        (role, thread, thread_segments(trace, thread, worst.start_cycles, worst.end_cycles))
+        (role, thread, thread_segments(trace, thread, *window))
         for role, thread in (
             ("waiter", pattern.waiter),
             ("holder", pattern.holder),
             ("middle", pattern.middle),
         )
     ]
-    scale = Scale(trace, worst.start_cycles, worst.end_cycles)
+    scale = Scale(trace, *window)
     worst_seconds = worst.duration_cycles / trace.cycles_per_sec
     count = len(pattern.occurrences)
     marker_list = markers(worst)
@@ -616,10 +697,10 @@ def pattern_card(pattern, trace, explanation=None):
   <div class="scroll">{duration_ruler(worst.duration_cycles, trace)}</div>
   <div>
     <div class="eyebrow">Worst occurrence</div>
-    <div class="scroll">{timeline_svg(trace, worst, lanes, marker_list)}</div>
+    <div class="scroll">{timeline_svg(trace, worst, lanes, marker_list, window=window)}</div>
   </div>
   {legend_html()}
-  {markers_html(marker_list)}
+  {markers_html(marker_list)}{user_marks_html(worst, trace, window)}
   <details><summary>Occurrences and evidence lines <small>{plural(count, "occurrence")}</small></summary>
   {occurrences_table(pattern, trace)}</details>
   <details><summary>Timeline as a table</summary>{segments_table(lanes, scale, trace)}</details>
@@ -631,11 +712,12 @@ def resolved_card(pattern, trace):
     roles = [("waiter", pattern.waiter), ("holder", pattern.holder)]
     if pattern.middle is not None:
         roles.append(("middle", pattern.middle))
+    window = usermarks.view_window(trace, worst.start_cycles, worst.end_cycles)
     lanes = [
-        (role, thread, thread_segments(trace, thread, worst.start_cycles, worst.end_cycles))
+        (role, thread, thread_segments(trace, thread, *window))
         for role, thread in roles
     ]
-    scale = Scale(trace, worst.start_cycles, worst.end_cycles)
+    scale = Scale(trace, *window)
     seconds = worst.duration_cycles / trace.cycles_per_sec
     count = len(pattern.occurrences)
     marker_list = markers(worst, "middle became ready")
@@ -697,10 +779,10 @@ def resolved_card(pattern, trace):
   <div class="scroll">{duration_ruler(worst.duration_cycles, trace)}</div>
   <div>
     <div class="eyebrow">Worst occurrence</div>
-    <div class="scroll">{timeline_svg(trace, worst, lanes, marker_list, ("holder",))}</div>
+    <div class="scroll">{timeline_svg(trace, worst, lanes, marker_list, ("holder",), window=window)}</div>
   </div>
   {legend_html()}
-  {markers_html(marker_list)}
+  {markers_html(marker_list)}{user_marks_html(worst, trace, window)}
   <details><summary>Occurrences and evidence lines <small>{plural(count, "occurrence")}</small></summary>
   {occurrences_table(pattern, trace, "Middle ready")}</details>
   <details><summary>Timeline as a table</summary>{segments_table(lanes, scale, trace)}</details>
@@ -1208,6 +1290,11 @@ def rules_summary(rules, trace):
     return "All rules passed in the blocks they evaluated"
 
 
+def mark_styles(trace):
+    """Reports for traces without markers keep exactly their previous bytes."""
+    return USER_MARKS_CSS if trace.markers else ""
+
+
 def render_rules_html(path, trace, rules, config, explanations):
     verdict = overall_status(rules)
     scope = (
@@ -1225,7 +1312,7 @@ def render_rules_html(path, trace, rules, config, explanations):
         scope,
         rules_overview(rules, config) + root_causes_card(rules, trace),
         body,
-        CSS + (EXPLANATION_CSS if explanations else "") + RULES_CSS,
+        CSS + (EXPLANATION_CSS if explanations else "") + RULES_CSS + mark_styles(trace),
     )
 
 
@@ -1283,7 +1370,7 @@ def render_html(path, trace, result, explanations=None, rules=None, config=None)
         scope,
         f'<div class="grid-2">{coverage_card(result)}{notes_card()}</div>',
         body,
-        CSS + (EXPLANATION_CSS if explanations else ""),
+        CSS + (EXPLANATION_CSS if explanations else "") + mark_styles(trace),
     )
 
 
