@@ -18,6 +18,7 @@ from .rules import (
     PASS,
     line_text,
     overall_status,
+    partial_note,
     root_cause_headline,
     root_cause_text,
     root_causes,
@@ -522,7 +523,8 @@ def markers(item, middle_label="middle first ran"):
     rows = [("block start", item.start_cycles, item.block_start_line)]
     if item.middle_cycles is not None:
         rows.append((middle_label, item.middle_cycles, item.middle_line))
-    rows.append(("release", item.release_cycles, item.release_line))
+    # The release can be logged just before the block event, off the left of the lanes.
+    rows.append(("release", max(item.release_cycles, item.start_cycles), item.release_line))
     rows.append(("block end", item.end_cycles, item.block_end_line))
     return [(number, *row) for number, row in enumerate(rows, 1)]
 
@@ -935,8 +937,8 @@ CHART_ALL_LABELS = 30
 STATUS_CLASS = {PASS: "pass", FAIL: "fail", ERROR: "fail", NOT_EVALUATED: "warn"}
 STATUS_ICON = {PASS: "✓", FAIL: "✕", ERROR: "✕", NOT_EVALUATED: "!"}
 VISIBILITY_NOTE = (
-    "A block already in progress when the trace started has no visible start, so it "
-    "cannot be measured."
+    "A block already in progress when the trace started has no visible start, so only "
+    "a lower bound on its length can be measured."
 )
 
 
@@ -1026,9 +1028,8 @@ def rule_heading(rule):
 
 def finding_duration(finding, trace):
     millis = finding.duration_cycles * 1000 / trace.cycles_per_sec
-    if finding.end_cycles is None:
-        return f"at least {millis:.3f} (still open at trace end)"
-    return f"{millis:.3f}"
+    note = partial_note(finding.end_cycles is None, finding.start_unknown)
+    return f"{millis:.3f}" if note is None else f"at least {millis:.3f} ({note})"
 
 
 def holder_cell(finding, trace):
@@ -1128,17 +1129,20 @@ def bar_path(x, top, width, base):
 
 
 def bar_class(block):
-    if block.still_open:
+    if block.still_open or block.start_unknown:
         return "bar-open"
     return "bar-over" if block.breach else "bar-ok"
 
 
 def bar_tooltip(number, block, budget, trace):
-    amount = f"at least {block.millis:.3f}" if block.still_open else f"{block.millis:.3f}"
+    partial = block.still_open or block.start_unknown
+    amount = f"at least {block.millis:.3f}" if partial else f"{block.millis:.3f}"
     verdict = f"over by {block.millis - budget:.3f} ms" if block.breach else "within budget"
     lines = [f"Block {number}: {amount} ms", f"budget {budget:g} ms, {verdict}"]
     if block.still_open:
         lines.append("still open when the trace ended")
+    if block.start_unknown:
+        lines.append("already blocked when the trace started")
     lines.append(f"start {trace.seconds(block.start_cycles):.6f} s, line {block.start_line}")
     return "\n".join(lines)
 
@@ -1213,12 +1217,21 @@ def blocks_svg(row, trace):
     )
 
 
+def partial_bar(block):
+    return block.still_open or block.start_unknown
+
+
+def partial_legend(blocks):
+    if any(b.start_unknown for b in blocks):
+        return "Over budget, start or end outside the trace (at least this long)"
+    return "Over budget, still open at trace end (at least this long)"
+
+
 def chart_legend(row):
     wanted = [
         ("bar-ok", "Within budget", any(not b.breach for b in row.blocks)),
-        ("bar-over", "Over budget", any(b.breach and not b.still_open for b in row.blocks)),
-        ("bar-open", "Over budget, still open at trace end (at least this long)",
-         any(b.still_open for b in row.blocks)),
+        ("bar-over", "Over budget", any(b.breach and not partial_bar(b) for b in row.blocks)),
+        ("bar-open", partial_legend(row.blocks), any(partial_bar(b) for b in row.blocks)),
     ]
     items = "".join(
         f'<span><svg viewBox="0 0 22 12" aria-hidden="true"><rect class="mark {cls}" '
@@ -1235,9 +1248,10 @@ def chart_legend(row):
 
 def chart_table(row, trace):
     rows = "".join(
-        f"<tr><td>{number}</td><td>{'at least ' if block.still_open else ''}{block.millis:.3f}</td>"
+        f"<tr><td>{number}</td><td>{'at least ' if partial_bar(block) else ''}{block.millis:.3f}</td>"
         f"<td>{'over budget' if block.breach else 'within budget'}"
-        f"{', still open' if block.still_open else ''}</td>"
+        f"{', still open' if block.still_open else ''}"
+        f"{', started before the trace' if block.start_unknown else ''}</td>"
         f"<td>{trace.seconds(block.start_cycles):.6f}</td><td>{block.start_line}</td></tr>"
         for number, block in enumerate(row.blocks, 1)
     )

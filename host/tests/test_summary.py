@@ -20,7 +20,7 @@ class SummaryRowTest(unittest.TestCase):
     def test_pass_row(self):
         self.assertIn(
             f"| `fixtures/demo_fixed.txt` | {PASS} | 0 | none | "
-            "13 of 71 blocks evaluated, 58 not evaluated |",
+            "13 of 72 blocks evaluated, 59 not evaluated |",
             render_summary([entry("demo_fixed")]),
         )
 

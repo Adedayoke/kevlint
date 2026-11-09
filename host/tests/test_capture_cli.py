@@ -204,6 +204,11 @@ class FailureTest(FakeTargetCase):
     def test_traceprinter_fails(self):
         self.assert_failed(self.capture(FAKE_TRACEPRINTER="fail"), "bad file")
 
+    def test_trace_much_shorter_than_requested_is_rejected(self):
+        args = ["capture", "--seconds", "30", "--settle", "0", "--out", self.prefix, "--run", "sleep 1"]
+        self.assert_failed(self.kevlint(*args), "covers only")
+        self.assert_no_output()
+
     def test_scp_fails(self):
         self.assert_failed(self.capture(FAKE_SCP="fail"), "could not copy")
 
