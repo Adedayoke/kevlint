@@ -123,9 +123,13 @@ found.
   at least two rules share a cause. This is a grouping, not proof of one cause.
 - `THRWLOCK_WRITE`, `THRWLOCK_READ` and `THMUON_MUTEX` count as not evaluated with the
   state named: on the inversion rule for any waiter at or above the minimum, and on a
-  budget for its own threads when the state is not in `states`. They feed the
-  not-evaluated warning, so a priority 254 `THMUON_MUTEX` (kernel clock thread) can
-  trigger it on a healthy trace. They are in `TRACKED_STATES`, not in `BLOCKING_STATES`.
+  budget for its own threads when the state is not in `states`. They are in
+  `TRACKED_STATES`, not in `BLOCKING_STATES`.
+- The not-evaluated warning covers application threads only. A not-evaluated block in
+  the kernel process (pid 1, shown by PROCCREATE_NAME as procnto) that outranks every
+  evaluated waiter gets a note naming thread, state and priority instead, saying kernel
+  internals are outside kevlint's scope. Both can appear. Like the warning, the note is
+  not in terminal output without `--config`.
 - Each rule's coverage has three categories:
   - Evaluated.
   - Not evaluated, with a reason: a real coverage gap.

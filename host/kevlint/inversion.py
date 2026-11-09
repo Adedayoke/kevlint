@@ -38,6 +38,9 @@ RELEASE_KIND = {release: kind for kind, (_, release) in CALLS.items()}
 # are counted as not evaluated, so that a PASS does not hide them.
 UNCHECKED_LOCK_STATES = ("THRWLOCK_WRITE", "THRWLOCK_READ", "THMUON_MUTEX")
 
+# In these traces, PROCCREATE_NAME gives pid 1 (ppid 0) as /proc/boot/procnto-smp-instr.
+KERNEL_PID = 1
+
 
 def unchecked_lock_reason(state):
     return f"blocked in {state}, which this rule does not check"
@@ -112,6 +115,15 @@ def boost_text(resolved, arrow="→"):
 
 
 @dataclass
+class KernelBlock:
+    """The highest-priority block not evaluated in the kernel process."""
+
+    description: str
+    state: str
+    priority: int
+
+
+@dataclass
 class Result:
     violations: list
     evaluated: int
@@ -120,12 +132,28 @@ class Result:
     not_evaluated_max_priority: int = None
     resolved: list = field(default_factory=list)
     excluded: int = 0
+    kernel_block: KernelBlock = None
+
+    def _outranks_evaluated(self, skipped):
+        checked = self.evaluated_max_priority
+        return skipped is not None and (checked is None or skipped > checked)
 
     @property
     def unevaluated_outranks_evaluated(self):
-        """True if a block the rule could not check outranks every waiter it did."""
-        skipped, checked = self.not_evaluated_max_priority, self.evaluated_max_priority
-        return skipped is not None and (checked is None or skipped > checked)
+        """True if an application block the rule could not check outranks every waiter it did."""
+        return self._outranks_evaluated(self.not_evaluated_max_priority)
+
+    @property
+    def kernel_note(self):
+        """Informational text if a kernel-internal block outranks every evaluated waiter."""
+        block = self.kernel_block
+        if block is None or not self._outranks_evaluated(block.priority):
+            return None
+        return (
+            f"Kernel-internal wait not evaluated: {block.description} in {block.state} at "
+            f"priority {block.priority}. Kernel internals (procnto, pid 1) are outside "
+            "kevlint's scope."
+        )
 
 
 @dataclass
@@ -435,6 +463,7 @@ def check(trace, min_waiter_priority=None):
     excluded = 0
     evaluated_max = None
     not_evaluated_max = None
+    kernel_block = None
     resolved = []
 
     for block in blocks:
@@ -456,7 +485,10 @@ def check(trace, min_waiter_priority=None):
 
         if reason is not None:
             not_evaluated[reason] += 1
-            not_evaluated_max = _higher(not_evaluated_max, block.start.priority)
+            if block.waiter[0] != KERNEL_PID:
+                not_evaluated_max = _higher(not_evaluated_max, block.start.priority)
+            elif priority is not None and (kernel_block is None or priority > kernel_block.priority):
+                kernel_block = KernelBlock(trace.describe(block.waiter), block.kind, priority)
             continue
         evaluated += 1
         evaluated_max = _higher(evaluated_max, block.start.priority)
@@ -469,5 +501,12 @@ def check(trace, min_waiter_priority=None):
             resolved.append(wait)
 
     return Result(
-        violations, evaluated, not_evaluated, evaluated_max, not_evaluated_max, resolved, excluded
+        violations,
+        evaluated,
+        not_evaluated,
+        evaluated_max,
+        not_evaluated_max,
+        resolved,
+        excluded,
+        kernel_block,
     )

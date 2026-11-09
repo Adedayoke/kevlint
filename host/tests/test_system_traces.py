@@ -112,6 +112,102 @@ class UncheckedLockStatesTest(unittest.TestCase):
             self.assertIn(reason, report.read_text(encoding="utf-8"))
 
 
+class KernelInternalNoteTest(unittest.TestCase):
+    NOTE = (
+        "Kernel-internal wait not evaluated: clock_cpu_1 (pid 1 tid 6) in THMUON_MUTEX at "
+        "priority 254. Kernel internals (procnto, pid 1) are outside kevlint's scope."
+    )
+    WARNING_HTML = "Warning: higher-priority blocks were not evaluated."
+    WARNING_RULE = "a not-evaluated block has priority"
+
+    @staticmethod
+    def thread_state(line, name, pid, priority, cpu=0):
+        fields = {"pid": str(pid), "tid": "6", "priority": str(priority)}
+        return Event(line, line, cpu, "THREAD", name, fields)
+
+    def result_with_blocks(self, *owners):
+        """Each owner is (pid, priority); every block is an unchecked lock, so not evaluated."""
+        events = []
+        for number, (pid, priority) in enumerate(owners):
+            base = number * 3 + 1
+            events += [
+                self.thread_state(base, "THRUNNING", pid, priority),
+                self.thread_state(base + 1, "THMUON_MUTEX", pid, priority),
+                self.thread_state(base + 2, "THREADY", pid, priority),
+            ]
+        return check(Trace(1000, 1, events, {(1, 6): "clock_cpu_1", (9, 6): "app"}))
+
+    def run_kevlint(self, tmp, *extra):
+        args = [sys.executable, "-m", "kevlint", "check", str(FIXTURES / "demo_markers_fixed.txt")]
+        return subprocess.run(
+            [*args, *extra],
+            capture_output=True,
+            text=True,
+            env={"PYTHONPATH": str(ROOT / "host")},
+            cwd=tmp,
+        )
+
+    def test_demo_markers_fixed_has_the_note_not_the_warning(self):
+        result = check(fixture("demo_markers_fixed"))
+        self.assertEqual(result.kernel_note, self.NOTE)
+        self.assertFalse(result.unevaluated_outranks_evaluated)
+
+    def test_html_without_config_shows_the_note_not_the_warning(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "r.html"
+            done = self.run_kevlint(tmp, "--html", str(report))
+            self.assertEqual(done.returncode, 0, done.stderr)
+            page = report.read_text(encoding="utf-8")
+        self.assertIn("kevlint&#x27;s scope", page)
+        self.assertIn("clock_cpu_1 (pid 1 tid 6) in THMUON_MUTEX at priority 254", page)
+        self.assertIn("(kernel-internal: <b>254</b>)", page)
+        self.assertNotIn(self.WARNING_HTML, page)
+        self.assertNotIn(self.WARNING_RULE, page)
+
+    def test_config_output_shows_the_note_not_the_warning(self):
+        config = ROOT / "kevlint.toml"
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "r.html"
+            summary = Path(tmp) / "s.md"
+            done = self.run_kevlint(
+                tmp, "--config", str(config), "--html", str(report), "--summary", str(summary)
+            )
+            self.assertEqual(done.returncode, 0, done.stderr)
+            page = report.read_text(encoding="utf-8")
+            markdown = summary.read_text(encoding="utf-8")
+        self.assertIn(f"NOTE: {self.NOTE}", done.stdout)
+        self.assertNotIn("WARNING", done.stdout)
+        self.assertIn("in THMUON_MUTEX at priority 254", page)
+        self.assertNotIn(self.WARNING_RULE, page)
+        self.assertIn(self.NOTE, markdown)
+        self.assertNotIn("not-evaluated block has", markdown)
+
+    def test_application_thread_keeps_the_warning(self):
+        result = self.result_with_blocks((9, 254))
+        self.assertTrue(result.unevaluated_outranks_evaluated)
+        self.assertEqual(result.not_evaluated_max_priority, 254)
+        self.assertIsNone(result.kernel_note)
+
+    def test_both_kinds_show_the_warning_and_the_note(self):
+        result = self.result_with_blocks((1, 254), (9, 30))
+        self.assertTrue(result.unevaluated_outranks_evaluated)
+        self.assertEqual(result.not_evaluated_max_priority, 30)
+        self.assertIn("clock_cpu_1 (pid 1 tid 6)", result.kernel_note)
+
+    def test_note_names_the_highest_kernel_block(self):
+        result = self.result_with_blocks((1, 21), (1, 254), (1, 100))
+        self.assertIn("at priority 254", result.kernel_note)
+
+    def test_kernel_block_below_an_evaluated_waiter_gets_no_note(self):
+        result = self.result_with_blocks((1, 254))
+        result.evaluated_max_priority = 254
+        self.assertIsNone(result.kernel_note)
+        self.assertFalse(result.unevaluated_outranks_evaluated)
+
+    def test_kernel_block_below_the_minimum_gets_no_note(self):
+        self.assertIsNone(check(fixture("demo_markers_fixed"), 255).kernel_note)
+
+
 class VerdictTest(unittest.TestCase):
     def test_no_inversion_on_ordinary_system_activity(self):
         for name in ("system_idle", "system_busy"):

@@ -226,6 +226,8 @@ def report_rules(path, trace, rules, config, out):
                 print(f"    not evaluated: {count} ({reason})", file=out)
         for warning in rule.warnings:
             print(f"  WARNING: {warning}", file=out)
+        for note in rule.notes:
+            print(f"  NOTE: {note}", file=out)
         for error in rule.errors:
             print(f"  ERROR: {error}", file=out)
 

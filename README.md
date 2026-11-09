@@ -219,8 +219,11 @@ The run found and fixed these bugs:
 
 - `priority-inversion` checks only `THSEM` and `THMUTEX`. Other lock states are
   counted as not evaluated and can outnumber the evaluated blocks on a busy system
-  (mostly `THRWLOCK_WRITE` in `io-sock`). A `THMUON_MUTEX` block at priority 254 also
-  triggers the warning that a not-evaluated block outranks every evaluated waiter.
+  (mostly `THRWLOCK_WRITE` in `io-sock`).
+- Kernel internals are outside kevlint's scope. A not-evaluated block in `procnto`
+  (pid 1), such as a clock thread in `THMUON_MUTEX` at priority 254, gets a note naming
+  the thread, state and priority instead of the warning that a not-evaluated block
+  outranks every evaluated waiter. The warning is kept for application threads.
 - Running `tracelogger` above the workload's priority makes its own threads appear
   in the trace (it trips `no-semaphore-high-priority`), so `kevlint capture` runs it
   at default priority.
