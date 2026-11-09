@@ -153,9 +153,23 @@ found.
   outside the waiter's block, and the hog writes none. Markers are context, not
   evidence of cause. They never go to `--explain`, the Markdown summary, or a verdict.
   Other rules show them in the terminal only.
-- The HTML timeline widens by at most 25% of the block's length to show a marker just
-  outside it. Traces without markers must keep byte-identical output.
+- The HTML timeline covers exactly the block. A marker inside it gets a line through
+  the lanes. The nearest marker on each side, within 25% of the block's length, gets
+  an outward arrow at the edge and a hollow letter, and its tooltip says "before the
+  block" or "after the block". Traces without markers must keep byte-identical output.
 - `markers_written` counts accepted markers: `TraceEvent` returns 0 with no logger.
+
+- Starting kevlintd after a target reboot: it does not start on its own and its binary
+  lives in `/tmp/kldev`, so copy it again. (Whether `/tmp` survives a reboot has not been
+  tested.) sshd must be running first: `sh /data/home/root/start_ssh.sh` on the console.
+  ```sh
+  source ~/qnx800/qnxsdp-env.sh; make -C target
+  ssh -p 2222 root@localhost 'mkdir -p /tmp/kldev'
+  scp -P 2222 target/kevlintd target/kevlintd_test target/fusion target/control target/sensor root@localhost:/tmp/kldev/
+  ssh -p 2222 root@localhost 'cd /tmp/kldev && ./kevlintd; cat /dev/kevlint/status'
+  ```
+  "already exists; is kevlintd running?" means it is. It backgrounds itself; `slay
+  kevlintd` stops it and removes its paths.
 
 ### `--explain` design
 - Never affects the verdict: explanations run after it is printed, and any
