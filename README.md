@@ -21,36 +21,13 @@ more. The two reports come from the same demo workload, recorded on QNX 8.0 unde
 priority 10 thread holds a lock that a priority 50 thread needs, while a priority 30
 thread hogs the CPU. The only change is the lock.
 
-| With `kevlint.toml` | Before: semaphore (`demo_inversion`) | After: priority-inheritance mutex (`demo_fixed`) |
+| With `kevlint.toml` | Before: semaphore | After: priority-inheritance mutex |
 |---|---|---|
-| `priority-inversion` | FAIL, 10 findings | PASS, 11 blocks evaluated |
-| `max-blocked-time` (100 ms) | FAIL, 10 findings | PASS, 11 blocks evaluated |
-| `no-semaphore-high-priority` | FAIL, 11 findings | PASS, 21 entries evaluated |
+| All 3 rules | FAIL, 31 findings | PASS, 0 findings |
 | Worst `fusion_rt` block | 249.1 ms | 24.3 ms |
 | Exit status | 1 | 0 |
 
 The durations are QEMU timings, so only their contrast means anything.
-
-## Why this matters
-
-Priority inversion has caused real failures. In 1997 the Mars Pathfinder lander, running
-VxWorks, kept resetting itself on Mars: a low-priority task held a mutex that a high-priority
-task needed, while medium-priority tasks kept running. The fix was to enable priority
-inheritance on that mutex. The team had seen the problem before landing but could not get it to
-repeat ([Glenn Reeves's account](https://www.cs.cornell.edu/courses/cs614/1999sp/papers/pathfinder2.html)).
-
-Bugs like this are easy to miss in normal testing, because the system still works, just late,
-and only when the timing lines up. Teams building automotive, medical and industrial products
-on QNX need timing checks they can repeat on every change.
-
-Commercial tools already do automated timing verification and list QNX support on their product
-pages: [Vector TA Tool Suite](https://www.vector.com/en/product/ta-tool-suite/),
-[INCHRON chronVIEW](https://www.inchron.com/chronview/) and
-[GLIWA T1](https://www.gliwa.com/products/t1timing/t1posix/). kevlint does not replace them, and
-we have not compared it with them. It is a small, open-source, CI-native complement with three
-rules, built on QNX semantics. It reads the instrumented kernel's trace directly, can budget
-time in message-passing states such as `THSEND` and `THREPLY`, and recognizes priority
-inheritance when a holder is boosted.
 
 **Contents:** [Quick start](#quick-start) ·
 [How it works](#how-it-works) ·
@@ -61,14 +38,15 @@ inheritance when a holder is boosted.
 [Limitations](#honest-limitations) ·
 [Evidence of QNX use](#evidence-of-qnx-use) ·
 [License](#license) ·
-[Architecture](docs/architecture.md)
+[Architecture](docs/architecture.md) ·
+[Reference](docs/reference.md)
 
 ## Quick start
 
 ### Run it locally
 
-This needs Python 3.11 or newer, with no packages to install and no QNX tools. Decoded
-traces from a real QNX 8.0 target are committed in `fixtures/`.
+This needs Python 3.11 or newer, with no packages to install and no QNX tools. Decoded traces
+from a real QNX 8.0 target are committed in `fixtures/`.
 
 ```sh
 git clone https://github.com/Adedayoke/kevlint.git
@@ -88,8 +66,8 @@ Open `before.html` and `after.html` in a browser. Each is one self-contained fil
 
 ### Use it in CI
 
-CI checks a committed `traceprinter` text file, recorded with `tracelogger -w`. It does
-not need QNX on the runner.
+CI checks a committed `traceprinter` text file, recorded with `tracelogger -w`. It does not need
+QNX on the runner.
 
 ```yaml
 steps:
@@ -108,37 +86,23 @@ steps:
       path: reports/my_system.html
 ```
 
-| Input | Required | Default | Description |
-|---|---|---|---|
-| `trace` | yes | | `traceprinter` text output, captured with `tracelogger -w` |
-| `report` | no | `kevlint-report.html` | Where to write the HTML report |
-| `config` | no | | A `kevlint.toml` rules file. Without it, only `priority-inversion` runs |
-
-The action fails the job on a violation and adds a results table to the job summary.
-It uses its own Python 3.12 and leaves the job's `python3` alone.
-
-This repository's own CI, in `.github/workflows/ci.yml`, runs the unit tests and then
-every trace listed in `ci/traces.txt`. [PR #1](https://github.com/Adedayoke/kevlint/pull/1)
-adds the inversion trace to that list, so its check is **red on purpose**. It shows
-what a failing build looks like and must never be merged.
+A violation fails the job, and a results table goes to the job summary.
+[PR #1](https://github.com/Adedayoke/kevlint/pull/1) shows a failing build. It is **red on
+purpose** and must never be merged.
 
 ## How it works
 
-1. **Record.** `tracelogger -w` records the kernel's events on the QNX target. Only wide
-   mode includes thread priority and policy.
+1. **Record.** `tracelogger -w` records kernel events on the target. Only wide mode includes
+   thread priority and policy.
 2. **Decode.** `traceprinter` turns the `.kev` file into text.
-3. **Parse.** kevlint keeps thread state changes, kernel calls, thread names and markers.
-4. **Check.** Each rule looks for blocked threads and judges them by structure:
-   priorities, sync objects and who ran when.
-5. **Report.** The result goes to the terminal, an HTML report with a timeline, and a
-   Markdown job summary. The exit status drives CI.
+3. **Check.** Each rule judges blocked threads by structure: priorities, sync objects and who
+   ran when.
+4. **Report.** Results go to the terminal, an HTML report and a Markdown job summary.
 
-The trace never names the thread holding a lock, so kevlint infers it: the holder is the
-thread whose post or unlock on the same `sync_p`, in the same process, released the
-waiter. A **priority inversion** is a thread with priority strictly between waiter and
-holder running on the holder's last CPU while the holder was in `THREADY`.
-
-The reasoning behind these choices is in [docs/architecture.md](docs/architecture.md).
+The trace never names a lock's holder, so kevlint infers it: the thread whose post or unlock on
+the same `sync_p`, in the same process, released the waiter. A **priority inversion** is a
+thread with priority strictly between waiter and holder running on the holder's last CPU while
+the holder was in `THREADY`. The reasoning is in [docs/architecture.md](docs/architecture.md).
 
 | Exit status | Meaning |
 |---|---|
@@ -148,67 +112,24 @@ The reasoning behind these choices is in [docs/architecture.md](docs/architectur
 
 ## Rules and config
 
-| Rule | What it flags | Settings |
-|---|---|---|
-| `priority-inversion` | The inversion defined above, in `THSEM` and `THMUTEX` | `enabled`, `min_waiter_priority` |
-| `max-blocked-time` | A named thread blocked strictly longer than its budget | `enabled`, `budgets`: `thread`, `max_ms`, optional `states`, `required` |
-| `no-semaphore-high-priority` | Any entry to `THSEM` at or above a priority. The report suggests a mutex, since QNX mutexes use priority inheritance | `enabled`, `min_priority` |
+| Rule | What it flags |
+|---|---|
+| `priority-inversion` | The inversion defined above, in `THSEM` and `THMUTEX` |
+| `max-blocked-time` | A named thread blocked longer than its budget |
+| `no-semaphore-high-priority` | Any entry to `THSEM` at or above a set priority |
 
-The sample [`kevlint.toml`](kevlint.toml) enables all three:
-
-```toml
-[rules.priority-inversion]
-enabled = true
-min_waiter_priority = 40
-
-[rules.max-blocked-time]
-enabled = true
-budgets = [{ thread = "fusion_rt", max_ms = 100, required = true }]
-
-[rules.no-semaphore-high-priority]
-enabled = true
-min_priority = 40
-```
-
-- **Explicit.** The config is read only with `--config`. Without it, only
-  `priority-inversion` runs. If a file omits that rule it stays on, and the other two
-  run only if configured.
-- **Strict.** An unknown rule, key or state, a wrong type, a non-positive budget, a
-  duplicate budget thread, or every rule disabled exits 2. A typo cannot silently turn a
-  check off.
-- **Budgets.** They count `THSEM` and `THMUTEX` unless `states` lists others, because
-  `THRECEIVE` and `THNANOSLEEP` are usually idle waits. A budget applies to every thread
-  with that name.
-- **Missing threads.** A budget's thread that is not in the trace gives `NOT EVALUATED`
-  with a warning, never PASS. With `required = true` it exits 2.
-- **Partial blocks.** A block with no visible start, or still open at trace end, is
-  reported as "at least" its length if already over budget. Otherwise it is not evaluated.
-- **Grouping.** When findings from at least two rules share a thread and sync object,
-  they are shown as one likely root cause. That is a grouping, not proof of one cause.
-
-The sample's 100 ms suits these QEMU demos only. Set real budgets from traces of the real
-target.
+Pass [`kevlint.toml`](kevlint.toml) with `--config`. Without it, only `priority-inversion` runs.
+Validation is strict: an unknown rule, key or state exits 2, so a typo cannot silently turn a
+check off. A budget's thread missing from the trace gives `NOT EVALUATED`, never PASS. All
+settings are in the [reference](docs/reference.md#rules-and-config).
 
 ## `kevlint capture` and `kevlintd`
 
-These parts need a QNX 8.0 target with an instrumented kernel, the QNX SDP on the host,
-and an ssh key that logs in without a prompt. The sample `run.sh` starts this project's
-QEMU image, which is not in the repository.
+These need a QNX 8.0 target with an instrumented kernel and the QNX SDP on the host.
+[Setup is in the reference](docs/reference.md#kevlint-capture-and-kevlintd).
 
-### Build and copy the target programs
-
-```sh
-source ~/qnx800/qnxsdp-env.sh
-make -C target
-ssh -p 2222 root@localhost 'mkdir -p /tmp/kldev'
-scp -P 2222 target/kevlintd target/kevlintd_test target/fusion target/control target/sensor \
-  root@localhost:/tmp/kldev/
-```
-
-### `kevlint capture`
-
-`capture` starts the workload over ssh, runs `tracelogger -w`, copies the trace back,
-decodes it, and then runs the normal check with the same exit status.
+`capture` starts the workload over ssh, runs `tracelogger -w`, copies the trace back, decodes it
+and runs the normal check.
 
 ```sh
 source ~/qnx800/qnxsdp-env.sh
@@ -216,153 +137,60 @@ PYTHONPATH=host python3 -m kevlint capture --seconds 3 --out fixtures/name --con
   --run 'cd /tmp/kldev; ./control & ./fusion --inversion & ./sensor & wait'
 ```
 
-It writes `name.kev`, `name.txt` and `name.json`, which records how the trace was made.
-The target comes from `--target user@host[:port]`, then `KEVLINT_TARGET`, then
-`root@localhost:2222`.
+Every failure exits 2 and writes no output files. A workload that ends early or a trace covering
+under 90% of `--seconds` is an error, because either could otherwise print a false PASS.
 
-Every failure exits 2 and writes nothing to the `--out` paths. Three guards stop a trace
-that lacks the workload from passing:
-
-- **Workload ended early.** If `--run` ends before tracing ends, the capture fails. An
-  early live run traced an idle system and printed PASS, which is why this is an error.
-- **Trace too short.** A trace covering under 90% of `--seconds` fails. `tracelogger`
-  exits 0 and prints nothing when its disk fills, so its status cannot be trusted.
-- **Required thread missing.** With `--config`, a budget with `required = true` exits 2
-  if its thread is not in the trace.
-
-### `kevlintd`
-
-`kevlintd` is a QNX resource manager that lets any program mark points in a trace with
-an ordinary file write.
+`kevlintd` is a QNX resource manager that lets any program mark points in a trace with a file
+write. Markers appear on the timeline as context, and never change a verdict.
 
 ```sh
-cd /tmp/kldev && ./kevlintd                          # backgrounds itself; -f stays in front
-echo "starting calibration" > /dev/kevlint/marker    # one user event in the trace
-cat /dev/kevlint/status                              # version, uptime and counters
+echo "starting calibration" > /dev/kevlint/marker
 ```
-
-- Marker text is at most 128 bytes of printable ASCII. A longer write fails with
-  `EMSGSIZE`, other bytes with `EINVAL`, and one trailing newline is allowed.
-- `kevlintd` adds the writer's pid and tid, and pads text to avoid a text-losing quirk in
-  QNX user string events. That behavior is measured in
-  [docs/qnx-trace-quirks.md](docs/qnx-trace-quirks.md).
-- Markers appear in the terminal and on the HTML timeline. They are context from the
-  workload, not evidence of cause. They never change a verdict and are never sent to the
-  LLM.
-- A marker write is a blocking message, so keep markers sparse and outside the blocks you
-  want to measure. The fusion demo writes them with `--markers`.
-- `capture --check-kevlintd` exits 2 if `kevlintd` is not running, and otherwise records
-  its status in `name.json`.
 
 ## AI explanations and their safeguards
 
-`--explain` on `check`, `check-all` or `capture` adds a plain-English explanation of each
-priority-inversion pattern to the terminal and HTML report. It uses an OpenAI-compatible
-endpoint set by `KEVLINT_LLM_BASE_URL`, `KEVLINT_LLM_API_KEY` and `KEVLINT_LLM_MODEL`.
-Without those, it prints one note and skips.
+`--explain` adds a plain-English explanation of each priority-inversion pattern, using an
+OpenAI-compatible endpoint. The design assumes the model can be wrong:
 
-The design assumes the model can be wrong:
+- **The verdict is already decided.** Any explanation failure becomes a note, and the exit
+  status does not change.
+- **Minimal evidence.** Only the worst occurrence's trace lines and fields are sent.
+- **Checked output.** Each claim must cite lines that were sent, and every hex value, priority or
+  duration must appear in them. One failure rejects the whole explanation.
+- **Untrusted text.** Model output is HTML-escaped, and the action and CI do not use `--explain`.
 
-- **The verdict is already decided.** Explanations run after the result is printed. Any
-  failure becomes a note, and the exit status does not change.
-- **Minimal evidence.** Each pattern sends only its worst occurrence: the relevant raw
-  trace lines and structured fields. It sends no file path or trace header.
-- **Citations are checked.** The model must return exactly two claims, a summary and a
-  cause, each citing trace lines. A claim with no lines, or a line that was not sent,
-  rejects the whole explanation.
-- **Values are checked.** A hex value, priority or duration must appear in that claim's
-  cited lines or the fields. Otherwise the explanation is rejected and the reason shown.
-- **kevlint writes the pointer.** The "where to look" line comes from the fields and is
-  labeled as not AI, because a model wrongly said all three threads shared the semaphore.
-- **Model text is untrusted.** It is HTML-escaped and stripped of control characters.
-- **Key safety.** Redirects are not followed, plain http is refused except on localhost,
-  and errors never include URLs or response bodies.
-- **Not in CI.** The action and this repository's CI do not use `--explain`, and
-  explanations never appear in the Markdown summary.
-
-These checks prove that a citation exists and a number is in the evidence. They do not
-prove the reasoning is right, so output stays labeled "claims were not verified".
-Accuracy has been judged by hand on only one live response, on `demo_inversion`.
+These checks do not prove the reasoning is right, so output stays labeled "claims were not
+verified". Accuracy has been judged by hand on only one live response.
+[Full safeguards](docs/reference.md#ai-explanations-and-their-safeguards).
 
 ## Validation
 
-- **Unit tests.** 414 tests pass, using real traces in `fixtures/`. They never call a real
-  LLM (`host/tests/fake_llm.py`) or a real target (`host/tests/fake_target.py`).
-- **Target test program.** `target/kevlintd_test.c` exercises `kevlintd` on QNX. In the
-  capture `fixtures/kevlintd_lengths.txt`, all 128 marker lengths decode exactly.
-- **CI.** Every push to `main` and every PR runs the tests and checks the listed traces. A separate job proves the
-  action passes a clean trace and fails one with a violation.
-- **Live captures.** Four repeat captures of the inversion demo gave FAIL. An 81-capture batch
-  compared `tracelogger` at default and raised priority.
+- **Tests.** 414 unit tests pass, using real traces in `fixtures/`, and CI runs them on every PR.
+- **Real QNX activity with no demo workload.** Across six traces, nothing crashed and the
+  structural rules found nothing in 3,630 evaluated blocks. That is not full coverage: 19,292
+  blocks were not evaluated. Only two of those traces are committed.
+- **Budget findings.** 100 ms test budgets gave 26 findings, 13 of them false positives on an idle
+  worker.
+- **Bugs found.** These runs exposed real bugs, now fixed, including a capture that filled the
+  disk and still printed PASS.
+- **Scale.** 1.5 million events took about 20 seconds and 0.9 GB of memory.
 
-**Real QNX activity with no demo workload.** kevlint ran on idle (5 s), a busy filesystem
-(5 s), network traffic (5 s), a mix of these (1 s), and two 30-second mixed captures, all
-under QEMU. Nothing crashed. Only `system_idle` and `system_busy` are committed, so the
-totals below cannot be reproduced from this repository alone.
-
-- **Structural rules: zero findings.** `priority-inversion` found no violation in 3,630
-  evaluated blocks, and `no-semaphore-high-priority` flagged none of 296 `THSEM` entries.
-  This is not full coverage: 19,292 blocks were not evaluated, mostly in `THRWLOCK_WRITE`.
-- **`max-blocked-time`: 26 findings from 100 ms budgets chosen for this test.** Thirteen on
-  `softirq_0` are false positives from that choice, because it is an idle worker that waits
-  on a semaphore for seconds. Thirteen on `fsys_resmgr` (111–355 ms) are real waits on the
-  disk path, not defects, since emulated disk timing says little about real hardware.
-- **Scale.** The longest trace, 1.5 million events and 215 MB of text, took about 20 seconds
-  and 0.9 GB of memory.
-
-That run found and fixed real bugs:
-
-- A capture that filled the disk still printed PASS. It now exits 2.
-- An unlock logged just before the waiter's block event was missed.
-- `THCREATE` from the trace-start state dump split one block into two.
-- Blocks already running when the trace began were printed as exact lengths.
-- The inversion rule took 43 s on a 1.35M-event trace, and now takes 11 s.
-- Blocks in `THRWLOCK_WRITE`, `THRWLOCK_READ` and `THMUON_MUTEX` were missing from coverage
-  counts, so a PASS hid them.
+[Full results and fixture tables](docs/validation.md).
 
 ## Honest limitations
 
-**What has been tested**
+1. **QEMU only.** Everything ran on QNX 8.0.0 x86_64 under QEMU with 2 CPUs, never on real
+   hardware, and QEMU timing is not realistic.
+2. **A PASS is bounded.** It covers only the blocks evaluated in a short trace. On `system_busy`,
+   `priority-inversion` evaluates 50 blocks and reports 299 as not evaluated. CI checks committed
+   traces and does not boot QNX.
+3. **Two lock types.** `priority-inversion` evaluates only `THSEM` and `THMUTEX`. Read-write
+   locks, `THMUON_MUTEX` and mutex re-acquires after a condvar wait are counted, not checked.
+4. **Holders are inferred.** A shared sync object released from another process is not matched.
+5. **Tracing disturbs the system.** Marker writes are blocking messages, and the overhead of the
+   instrumented kernel and `tracelogger` has not been measured.
 
-- Everything ran on QNX 8.0.0 x86_64 under QEMU with 2 CPUs. It has never run on real
-  hardware, and QEMU timing is not realistic. The durations here say nothing about
-  production behavior.
-- CI checks committed traces. It does not boot QNX or capture a fresh trace.
-
-**What a PASS does not mean**
-
-- A trace is a short window, so a PASS covers only what happened in it.
-- `priority-inversion` evaluates only `THSEM` and `THMUTEX`. On `system_busy` it evaluates
-  50 blocks and leaves 299 not evaluated, mostly `THRWLOCK_WRITE`. Those are counted and
-  reported, not checked.
-- Mutex re-acquires after a condvar wait are not evaluated, because no wait call matches
-  them.
-- On `demo_normal` with the sample config, `priority-inversion` evaluates 0 blocks, because no
-  high-priority lock contention occurs in that run: the holder releases the lock before waking
-  `fusion_rt`, so `fusion_rt` never blocks on it. Of the 61 blocks, 60 are below
-  `min_waiter_priority` and 1 is a kernel-internal wait that is not evaluated. That PASS says
-  nothing about inversions, and the output shows it as 0 evaluated.
-- A long block with no thread of intermediate priority is not an inversion. Only a budget
-  on `max-blocked-time` catches it, and budgets are absolute thresholds.
-
-**What can be wrong**
-
-- Holders are inferred. A shared sync object released from another process is not matched,
-  and that block is reported as having no visible release.
-- Kernel internals in `procnto` (pid 1) are outside kevlint's scope. A high-priority
-  not-evaluated kernel block gets a note instead of a warning.
-- AI explanations can be wrong in ways the checks cannot catch, as described above.
-
-**Practical limits**
-
-- Tracing changes what it measures. See
-  [observer effects](docs/architecture.md#observer-effects).
-- Captures of the demo can be rejected under load, when tracing finishes after the workload has
-  ended. One batch rejected 9 of 12 at `-d 8` and a later one 2 of 36. Why that changed is
-  unknown.
-- Memory is about 580 bytes per trace event, which matters for long traces.
-- Target setup is manual. `kevlintd` does not start on its own after a reboot.
-- The `kevlintd` user-event workarounds are based on measured behavior whose cause is unknown.
+[All limitations](docs/limitations.md).
 
 ## Evidence of QNX use
 
