@@ -47,16 +47,22 @@ CSP = (
 
 # Only reports with explanations carry this, so other reports stay unchanged.
 USER_MARK_BAND = 30
+EDGE_BOX_OFFSET = 22
+MARK_BEFORE, MARK_INSIDE, MARK_AFTER = "before", "inside", "after"
 MAX_USER_MARKS = 8
 
 USER_MARKS_CSS = """
 .timeline .user-mark { stroke: var(--running); stroke-width: 1.5; stroke-dasharray: 2 3; }
 .timeline .user-box { fill: var(--running); }
 .timeline .user-letter { fill: var(--surface); font-size: 11px; font-weight: 700; text-anchor: middle; }
+.timeline .user-box.outside { fill: none; stroke: var(--running); stroke-width: 1.5; }
+.timeline .user-letter.outside { fill: var(--running); }
+.timeline .user-arrow { fill: var(--running); }
 .user-marks { display: grid; gap: 6px; }
 .user-marks small { color: var(--muted); font-weight: 400; }
 .user-marks p { margin: 0; }
 .markers .user-letter { background: var(--running); border-radius: 3px; color: var(--surface); }
+.markers .user-letter.outside { background: none; box-shadow: inset 0 0 0 1.5px var(--running); color: var(--running); }
 """
 
 EXPLANATION_CSS = """
@@ -403,34 +409,68 @@ def badge_positions(true_xs):
     return positions
 
 
-def lettered_marks(trace, window):
-    """Pair the first few markers in the view with the letters drawn for them."""
-    marks = usermarks.within(trace, *window)[:MAX_USER_MARKS]
-    return [(chr(ord("A") + index), mark) for index, mark in enumerate(marks)]
+def lettered_marks(trace, item):
+    """Return [(letter, side, marker)] for a block, and how many were left out."""
+    earlier, inside, later = usermarks.around(trace, item.start_cycles, item.end_cycles)
+    placed = (
+        [(MARK_BEFORE, mark) for mark in earlier]
+        + [(MARK_INSIDE, mark) for mark in inside[:MAX_USER_MARKS]]
+        + [(MARK_AFTER, mark) for mark in later]
+    )
+    lettered = [(chr(ord("A") + index), side, mark) for index, (side, mark) in enumerate(placed)]
+    return lettered, max(len(inside) - MAX_USER_MARKS, 0)
 
 
-def user_marks_svg(trace, lettered, scale, bottom):
-    """Draw one letter below the axis, and a line up through the lanes, per marker."""
+def mark_box_x(side, mark, scale):
+    if side == MARK_BEFORE:
+        return LEFT + EDGE_BOX_OFFSET
+    if side == MARK_AFTER:
+        return WIDTH - RIGHT - EDGE_BOX_OFFSET
+    return scale.x(mark.cycles)
+
+
+def edge_arrow_svg(side, box_x, label_y):
+    """An arrow pointing away from the timeline: this marker is outside the block."""
+    middle = label_y + 9
+    if side == MARK_BEFORE:
+        tip, base = box_x - 21, box_x - 11
+    else:
+        tip, base = box_x + 21, box_x + 11
+    points = f"{tip:.1f},{middle} {base:.1f},{middle - 6} {base:.1f},{middle + 6}"
+    return f'<polygon class="user-arrow" points="{points}"/>'
+
+
+def user_marks_svg(trace, item, lettered, scale, bottom):
+    """Draw a marker inside the block on the lanes, and one outside it as an edge arrow."""
     label_y = bottom + AXIS_HEIGHT + 10
     parts = []
-    positions = badge_positions([scale.x(mark.cycles) for _, mark in lettered])
-    for (letter, mark), box_x in zip(lettered, positions):
-        x = scale.x(mark.cycles)
-        tip = esc(f'"{mark.text}" from {trace.describe(mark.thread)}, line {mark.line}')
+    positions = badge_positions([mark_box_x(side, mark, scale) for _, side, mark in lettered])
+    for (letter, side, mark), box_x in zip(lettered, positions):
+        tip = esc(
+            f'"{mark.text}" from {trace.describe(mark.thread)}, '
+            f"{mark_position(mark, item, trace)}, line {mark.line}"
+        )
+        outside = "" if side == MARK_INSIDE else " outside"
+        if side == MARK_INSIDE:
+            x = scale.x(mark.cycles)
+            parts.append(
+                f'<line class="user-mark" x1="{x:.1f}" x2="{x:.1f}" y1="{TOP - 8}" y2="{bottom}"/>'
+                f'<line class="user-mark" x1="{x:.1f}" x2="{box_x:.1f}" y1="{bottom}" y2="{label_y}"/>'
+            )
+        else:
+            parts.append(edge_arrow_svg(side, box_x, label_y))
         parts.append(
-            f'<line class="user-mark" x1="{x:.1f}" x2="{x:.1f}" y1="{TOP - 8}" y2="{bottom}"/>'
-            f'<line class="user-mark" x1="{x:.1f}" x2="{box_x:.1f}" y1="{bottom}" y2="{label_y}"/>'
             f'<g class="seg" tabindex="0" data-tip="{tip}"><title>{tip}</title>'
-            f'<rect class="user-box" x="{box_x - 9:.1f}" y="{label_y}" width="18" height="18" rx="3"/>'
-            f'<text class="user-letter" x="{box_x:.1f}" y="{label_y + 13}">{letter}</text></g>'
+            f'<rect class="user-box{outside}" x="{box_x - 9:.1f}" y="{label_y}" width="18" height="18" rx="3"/>'
+            f'<text class="user-letter{outside}" x="{box_x:.1f}" y="{label_y + 13}">{letter}</text></g>'
         )
     return "".join(parts)
 
 
-def timeline_svg(trace, violation, lanes, marker_list, priority_roles=(), window=None):
-    start, end = window or (violation.start_cycles, violation.end_cycles)
+def timeline_svg(trace, violation, lanes, marker_list, priority_roles=()):
+    start, end = violation.start_cycles, violation.end_cycles
     scale = Scale(trace, start, end)
-    lettered = lettered_marks(trace, (start, end))
+    lettered, _ = lettered_marks(trace, violation)
     bottom = TOP + len(lanes) * (LANE_HEIGHT + LANE_GAP) - LANE_GAP
     height = bottom + AXIS_HEIGHT + (USER_MARK_BAND if lettered else 0)
     parts = [
@@ -473,7 +513,7 @@ def timeline_svg(trace, violation, lanes, marker_list, priority_roles=(), window
             f'<text class="badge-n" x="{badge_x:.1f}" y="15">{number}</text>'
         )
     if lettered:
-        parts.append(user_marks_svg(trace, lettered, scale, bottom))
+        parts.append(user_marks_svg(trace, violation, lettered, scale, bottom))
     parts.append("</svg>")
     return "".join(parts)
 
@@ -546,7 +586,7 @@ def mark_position(mark, item, trace):
     return "during the block"
 
 
-def user_marks_html(item, trace, window):
+def user_marks_html(item, trace):
     """Describe the markers around a block. Empty for a trace without markers."""
     if not trace.markers:
         return ""
@@ -558,14 +598,13 @@ def user_marks_html(item, trace, window):
             f"{thread_html(trace, nearest.thread)}, {mark_position(nearest, item, trace)}, "
             f"line {nearest.line}."
         )
-    lettered = lettered_marks(trace, window)
+    lettered, hidden = lettered_marks(trace, item)
     rows = "".join(
-        f'<li><b class="user-letter">{letter}</b>&quot;{esc(mark.text)}&quot;, '
-        f"{mark_position(mark, item, trace)}, line {mark.line}</li>"
-        for letter, mark in lettered
+        f'<li><b class="user-letter{"" if side == MARK_INSIDE else " outside"}">{letter}</b>'
+        f"&quot;{esc(mark.text)}&quot;, {mark_position(mark, item, trace)}, line {mark.line}</li>"
+        for letter, side, mark in lettered
     )
-    total = len(usermarks.within(trace, *window))
-    more = f"<p><small>{total - len(lettered)} more in this view are not drawn.</small></p>" if total > len(lettered) else ""
+    more = f"<p><small>{hidden} more during the block are not drawn.</small></p>" if hidden else ""
     listing = f'<ol class="markers">{rows}</ol>' if rows else ""
     return (
         '<div class="user-marks"><div class="eyebrow">Trace markers '
@@ -669,16 +708,15 @@ def explanation_html(explanation):
 
 def pattern_card(pattern, trace, explanation=None):
     worst = pattern.worst
-    window = usermarks.view_window(trace, worst.start_cycles, worst.end_cycles)
     lanes = [
-        (role, thread, thread_segments(trace, thread, *window))
+        (role, thread, thread_segments(trace, thread, worst.start_cycles, worst.end_cycles))
         for role, thread in (
             ("waiter", pattern.waiter),
             ("holder", pattern.holder),
             ("middle", pattern.middle),
         )
     ]
-    scale = Scale(trace, *window)
+    scale = Scale(trace, worst.start_cycles, worst.end_cycles)
     worst_seconds = worst.duration_cycles / trace.cycles_per_sec
     count = len(pattern.occurrences)
     marker_list = markers(worst)
@@ -697,10 +735,10 @@ def pattern_card(pattern, trace, explanation=None):
   <div class="scroll">{duration_ruler(worst.duration_cycles, trace)}</div>
   <div>
     <div class="eyebrow">Worst occurrence</div>
-    <div class="scroll">{timeline_svg(trace, worst, lanes, marker_list, window=window)}</div>
+    <div class="scroll">{timeline_svg(trace, worst, lanes, marker_list)}</div>
   </div>
   {legend_html()}
-  {markers_html(marker_list)}{user_marks_html(worst, trace, window)}
+  {markers_html(marker_list)}{user_marks_html(worst, trace)}
   <details><summary>Occurrences and evidence lines <small>{plural(count, "occurrence")}</small></summary>
   {occurrences_table(pattern, trace)}</details>
   <details><summary>Timeline as a table</summary>{segments_table(lanes, scale, trace)}</details>
@@ -712,12 +750,11 @@ def resolved_card(pattern, trace):
     roles = [("waiter", pattern.waiter), ("holder", pattern.holder)]
     if pattern.middle is not None:
         roles.append(("middle", pattern.middle))
-    window = usermarks.view_window(trace, worst.start_cycles, worst.end_cycles)
     lanes = [
-        (role, thread, thread_segments(trace, thread, *window))
+        (role, thread, thread_segments(trace, thread, worst.start_cycles, worst.end_cycles))
         for role, thread in roles
     ]
-    scale = Scale(trace, *window)
+    scale = Scale(trace, worst.start_cycles, worst.end_cycles)
     seconds = worst.duration_cycles / trace.cycles_per_sec
     count = len(pattern.occurrences)
     marker_list = markers(worst, "middle became ready")
@@ -779,10 +816,10 @@ def resolved_card(pattern, trace):
   <div class="scroll">{duration_ruler(worst.duration_cycles, trace)}</div>
   <div>
     <div class="eyebrow">Worst occurrence</div>
-    <div class="scroll">{timeline_svg(trace, worst, lanes, marker_list, ("holder",), window=window)}</div>
+    <div class="scroll">{timeline_svg(trace, worst, lanes, marker_list, ("holder",))}</div>
   </div>
   {legend_html()}
-  {markers_html(marker_list)}{user_marks_html(worst, trace, window)}
+  {markers_html(marker_list)}{user_marks_html(worst, trace)}
   <details><summary>Occurrences and evidence lines <small>{plural(count, "occurrence")}</small></summary>
   {occurrences_table(pattern, trace, "Middle ready")}</details>
   <details><summary>Timeline as a table</summary>{segments_table(lanes, scale, trace)}</details>

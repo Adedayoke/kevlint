@@ -120,8 +120,9 @@ sends a message to `kevlintd`, so it affects scheduling. Keep markers sparse and
 outside the blocks you want to measure. `markers_written` counts markers handed to
 the kernel, including when no trace was running.
 
-`check` shows the nearest marker before a block, and the HTML timeline shows markers
-in and just around the block. Markers are context from the workload, not evidence of
+`check` shows the nearest marker before a block. The HTML timeline draws markers
+inside the block on the lanes, and the nearest marker just outside it as an arrow at
+the edge. Markers are context from the workload, not evidence of
 cause, and they never change a verdict. They are not sent to `--explain` and do not
 appear in the Markdown summary. The fusion demo writes them with `--markers`.
 
