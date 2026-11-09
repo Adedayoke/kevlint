@@ -193,13 +193,12 @@ are kept as the fixtures `system_idle` and `system_busy`. Nothing crashed. The l
 
 - **Structural rules: zero findings.** `priority-inversion` found no violation in 3,630
   evaluated blocks, and `no-semaphore-high-priority` flagged none of 296 `THSEM` entries.
-  This is not full coverage: 19,292 blocks were not evaluated, mostly `THRWLOCK_WRITE`,
-  with no wait to check.
+  This is not full coverage: 19,292 blocks were not evaluated, mostly in `THRWLOCK_WRITE`.
 - **`max-blocked-time`: 26 findings, none a kevlint error, from 100 ms budgets chosen for
   this test.** Thirteen on `softirq_0` are false positives from that choice: it is an idle
   worker that waits on a semaphore for seconds between wakeups. Thirteen on `fsys_resmgr`
   (111–355 ms) are real waits on the disk path, released by `eide_driver_thread` or by a
-  thread that had itself waited on it. They are not defects, since emulated disk timing
+  thread that was itself waiting on it (holders are inferred). They are not defects, since emulated disk timing
   says little about real hardware.
 
 The run found and fixed these bugs:
