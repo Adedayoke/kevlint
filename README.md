@@ -316,8 +316,11 @@ That run found and fixed real bugs:
   reported, not checked.
 - Mutex re-acquires after a condvar wait are not evaluated, because no wait call matches
   them.
-- On `demo_normal` with the sample config, `priority-inversion` evaluates 0 blocks: 60 are below
-  `min_waiter_priority` and 1 is not evaluated. That PASS is empty, and the output says so.
+- On `demo_normal` with the sample config, `priority-inversion` evaluates 0 blocks, because no
+  high-priority lock contention occurs in that run: the holder releases the lock before waking
+  `fusion_rt`, so `fusion_rt` never blocks on it. Of the 61 blocks, 60 are below
+  `min_waiter_priority` and 1 is a kernel-internal wait that is not evaluated. That PASS says
+  nothing about inversions, and the output shows it as 0 evaluated.
 - A long block with no thread of intermediate priority is not an inversion. Only a budget
   on `max-blocked-time` catches it, and budgets are absolute thresholds.
 
