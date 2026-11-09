@@ -31,6 +31,27 @@ thread hogs the CPU. The only change is the lock.
 
 The durations are QEMU timings, so only their contrast means anything.
 
+## Why this matters
+
+Priority inversion has caused real failures. In 1997 the Mars Pathfinder lander, running
+VxWorks, kept resetting itself on Mars: a low-priority task held a mutex that a high-priority
+task needed, while medium-priority tasks kept running. The fix was to enable priority
+inheritance on that mutex. The team had seen the problem before landing but could not get it to
+repeat ([Glenn Reeves's account](https://www.cs.cornell.edu/courses/cs614/1999sp/papers/pathfinder2.html)).
+
+Bugs like this are easy to miss in normal testing, because the system still works, just late,
+and only when the timing lines up. Teams building automotive, medical and industrial products
+on QNX need timing checks they can repeat on every change.
+
+Commercial tools already do automated timing verification and list QNX support on their product
+pages: [Vector TA Tool Suite](https://www.vector.com/en/product/ta-tool-suite/),
+[INCHRON chronVIEW](https://www.inchron.com/chronview/) and
+[GLIWA T1](https://www.gliwa.com/products/t1timing/t1posix/). kevlint does not replace them, and
+we have not compared it with them. It is a small, open-source, CI-native complement with three
+rules, built on QNX semantics. It reads the instrumented kernel's trace directly, can budget
+time in message-passing states such as `THSEND` and `THREPLY`, and recognizes priority
+inheritance when a holder is boosted.
+
 **Contents:** [Quick start](#quick-start) ·
 [How it works](#how-it-works) ·
 [Rules and config](#rules-and-config) ·
