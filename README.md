@@ -8,6 +8,8 @@ trace lines behind it, and every PASS says how many blocks it could not evaluate
 optional LLM explains violations from those same lines, and can never change the
 verdict.
 
+**Tutorial:** [Run QNX 8.0 on Windows with WSL2 and capture your first kernel trace](docs/tutorial-qnx-wsl.md).
+
 **Before:** `fixtures/demo_inversion.txt`. The urgent thread waits behind unrelated work.
 
 ![kevlint HTML report for demo_inversion: FAIL, with fusion_rt blocked for 249 ms while fusion_hog runs and fusion_holder sits ready](docs/images/report-before.png)
@@ -54,7 +56,8 @@ Where those tools are commercial products, kevlint makes the core check free and
 every pull request can check a recorded trace for high-priority threads held up by
 lower-priority work, and say exactly what it evaluated.
 
-**Contents:** [Quick start](#quick-start) ·
+**Contents:** [Tutorial](docs/tutorial-qnx-wsl.md) ·
+[Quick start](#quick-start) ·
 [How it works](#how-it-works) ·
 [Rules and config](#rules-and-config) ·
 [`kevlint capture` and `kevlintd`](#kevlint-capture-and-kevlintd) ·
