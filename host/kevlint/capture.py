@@ -3,12 +3,20 @@
 Uses the system ssh and scp, and traceprinter from the QNX SDP. Every failure
 raises CaptureError with a message that says what to do next.
 """
+import datetime
+import json
 import os
 import re
 import shlex
 import shutil
 import subprocess
+import sys
+import tempfile
+import uuid
 from dataclasses import dataclass, field
+from typing import Optional
+
+from . import __version__
 
 DEFAULT_TARGET = "root@localhost:2222"
 TARGET_ENV = "KEVLINT_TARGET"
@@ -21,7 +29,10 @@ COPY_TIMEOUT = 120
 CAPTURE_MARGIN = 60
 WORKLOAD_GRACE = 30
 MARK = "@kevlint "
+CANNOT_EXECUTE = ("126", "127")  # the shell's status for a command it could not run
 LOG_TAIL = 20
+DECODE_TIMEOUT = 120
+GIT_TIMEOUT = 10
 START_SSHD = "sh /data/home/root/start_ssh.sh"
 
 # The port answered and then dropped us. QEMU's port forward accepts the
@@ -286,6 +297,12 @@ def check_report(report):
             f"{status['workload_before_capture']}), so the trace would not contain it. "
             f"Check the --run command. Workload output:\n{log_tail(report.log)}"
         )
+    finished = status.get("workload_status")
+    if finished in CANNOT_EXECUTE and status.get("alive_after_capture") == "0":
+        raise CaptureError(
+            f"the workload could not be started (exit status {finished}), so the trace would "
+            f"not contain it. Check the --run command. Workload output:\n{log_tail(report.log)}"
+        )
     traced = status.get("tracelogger_status")
     if traced is None:
         raise CaptureError("the target did not report a tracelogger result")
@@ -301,9 +318,141 @@ def check_report(report):
     warnings = []
     if status.get("alive_after_capture") == "0":
         warnings.append("the workload finished before tracing ended, so the trace only partly covers it")
-    finished = status.get("workload_status")
     if finished == "running":
         warnings.append("the workload was still running after the capture and was left running on the target")
     elif finished not in (None, "0"):
         warnings.append(f"the workload exited with status {finished}")
     return warnings
+
+
+def decode(kev, txt):
+    """Run traceprinter and confirm that the result has events."""
+    try:
+        with open(txt, "w", encoding="utf-8") as out:
+            done = subprocess.run(
+                ["traceprinter", "-f", kev],
+                stdin=subprocess.DEVNULL,
+                stdout=out,
+                stderr=subprocess.PIPE,
+                text=True,
+                errors="replace",
+                timeout=DECODE_TIMEOUT,
+            )
+    except subprocess.TimeoutExpired:
+        raise CaptureError("traceprinter did not finish decoding the trace") from None
+    except OSError as error:
+        raise CaptureError(f"cannot run traceprinter: {error}") from None
+    if done.returncode != 0:
+        raise CaptureError(f"traceprinter failed with status {done.returncode}: {done.stderr.strip()}")
+    with open(txt, encoding="utf-8", errors="replace") as lines:
+        if not any(line.startswith("t:0x") for line in lines):
+            raise CaptureError(
+                "the capture produced no events: the decoded trace is empty. Check that the "
+                "target runs an instrumented kernel."
+            )
+
+
+def git_info():
+    """Return (commit, dirty) for kevlint's own source, or (None, None)."""
+    source = os.path.dirname(os.path.abspath(__file__))
+
+    def git(*args):
+        return subprocess.run(
+            ["git", "-C", source, *args],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=GIT_TIMEOUT,
+        )
+
+    try:
+        commit = git("rev-parse", "HEAD")
+        changes = git("status", "--porcelain", "--untracked-files=no")
+    except (OSError, subprocess.TimeoutExpired):
+        return None, None
+    if commit.returncode != 0 or changes.returncode != 0:
+        return None, None
+    return commit.stdout.strip(), bool(changes.stdout.strip())
+
+
+@dataclass
+class Options:
+    seconds: str
+    out: str
+    run: Optional[str] = None
+    target: Optional[str] = None
+    settle: int = 2
+    force: bool = False
+    command_line: str = ""
+    workload_grace: int = WORKLOAD_GRACE
+
+
+def metadata(options, target, kev, report):
+    commit, dirty = git_info()
+    finished = report.status.get("workload_status")
+    return {
+        "capture_command": tracelogger_command(options.seconds, kev),
+        "workload_command": options.run,
+        "date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "kevlint_version": __version__,
+        "git_commit": commit,
+        "git_dirty": dirty,
+        "kevlint_command": options.command_line,
+        "target": str(target),
+        "settle_seconds": options.settle if options.run is not None else None,
+        "workload_status": finished,
+    }
+
+
+def capture(options, environ=None):
+    """Capture, copy and decode a trace, and return the path of the decoded text.
+
+    Nothing appears at the output paths unless every step succeeds.
+    """
+    environ = os.environ if environ is None else environ
+    target = resolve_target(options.target, environ)
+    paths = output_paths(options.out)
+    check_outputs(paths, options.force)
+    check_host_tools(environ)
+    try:
+        work = tempfile.mkdtemp(prefix=".kevlint_capture_", dir=os.path.dirname(paths["kev"]) or ".")
+    except OSError as error:
+        raise CaptureError(f"cannot write to the output directory: {error}") from None
+
+    session = Session(target)
+    name = uuid.uuid4().hex[:12]
+    kev = f"/tmp/kevlint_{name}.kev"
+    log = f"/tmp/kevlint_{name}.log"
+    local = {suffix: os.path.join(work, f"capture.{suffix}") for suffix in paths}
+    started = False
+    try:
+        print(f"kevlint capture: connecting to {target}", flush=True)
+        session.preflight()
+        settle = options.settle if options.run is not None else 0
+        print(f"kevlint capture: tracing for {options.seconds} s", flush=True)
+        script = remote_script(options.run, options.seconds, settle, kev, log, options.workload_grace)
+        timeout = settle + float(options.seconds) + options.workload_grace + CAPTURE_MARGIN
+        started = True
+        report = parse_report(session.run_script(script, timeout))
+        warnings = check_report(report)
+        if options.run is not None:
+            print(f"Workload output:\n{log_tail(report.log)}", flush=True)
+        print("kevlint capture: copying and decoding the trace", flush=True)
+        session.copy(kev, local["kev"])
+        decode(local["kev"], local["txt"])
+        with open(local["json"], "w", encoding="utf-8") as out:
+            json.dump(metadata(options, target, kev, report), out, indent=2)
+            out.write("\n")
+        for suffix, path in paths.items():
+            os.replace(local[suffix], path)
+    except OSError as error:
+        raise CaptureError(f"cannot write the capture output: {error}") from None
+    finally:
+        if started:
+            session.remove(kev, log)
+        shutil.rmtree(work, ignore_errors=True)
+
+    for warning in warnings:
+        print(f"kevlint: warning: {warning}", file=sys.stderr, flush=True)
+    print(f"Captured: {paths['kev']}, {paths['txt']}, {paths['json']}\n", flush=True)
+    return paths["txt"]

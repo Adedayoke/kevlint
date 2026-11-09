@@ -1,15 +1,20 @@
 """Command line: python -m kevlint check <trace.txt>
                 python -m kevlint check-all <list.txt> --reports-dir <dir>
+                python -m kevlint capture --seconds <s> --out <prefix> [--run <cmd>]
 
 Exit status: 0 no violations, 1 violations found, 2 a trace, list, config or
 output file could not be used, or a required thread is missing.
 """
 import argparse
 import logging
+import math
 import os
+import re
+import shlex
 import sys
 from pathlib import Path
 
+from .capture import CaptureError, Options, capture
 from .config import NO_SEMAPHORE, ConfigError
 from .config import load_config as load_rules_config
 from .explain import Explainer, print_explanations
@@ -30,6 +35,21 @@ from .summary import Entry, append_summary
 EXPLAIN_HELP = "add AI-generated explanations of violations (never changes the exit status)"
 CONFIG_HELP = "TOML rules file; without it only priority-inversion runs"
 DEBUG_HELP = "print debug messages to stderr, such as a retry without the LLM seed"
+CAPTURE_TARGET_HELP = "user@host[:port] of the target; default $KEVLINT_TARGET, then root@localhost:2222"
+SETTLE_HELP = "seconds between starting --run and starting the trace (default 2)"
+
+
+def seconds_arg(text):
+    """A duration above zero, kept as text: tracelogger -s 0 would never stop."""
+    if not re.fullmatch(r"[0-9]+(\.[0-9]+)?", text) or not 0 < float(text) < math.inf:
+        raise argparse.ArgumentTypeError(f"must be a number above 0: {text!r}")
+    return text
+
+
+def settle_arg(text):
+    if not re.fullmatch(r"[0-9]+", text):
+        raise argparse.ArgumentTypeError(f"must be a whole number of seconds: {text!r}")
+    return int(text)
 
 
 def resolved_line(trace, result):
@@ -299,6 +319,29 @@ def check_all(list_path, reports_dir, summary_path, explainer=None, config=None)
     return finish(entries, summary_path)
 
 
+def run_capture(args, argv, explainer, config):
+    """Capture a trace, then give it the normal check and exit status."""
+    if args.run is not None and not args.run.strip():
+        print("kevlint: capture failed: --run is empty", file=sys.stderr)
+        return 2
+    words = sys.argv[1:] if argv is None else argv
+    options = Options(
+        seconds=args.seconds,
+        out=args.out,
+        run=args.run,
+        target=args.target,
+        settle=args.settle,
+        force=args.force,
+        command_line=shlex.join(["kevlint", *words]),
+    )
+    try:
+        trace_path = capture(options)
+    except CaptureError as error:
+        print(f"kevlint: capture failed: {error}", file=sys.stderr)
+        return 2
+    return finish([check_trace(trace_path, args.html, explainer, config)], None)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="kevlint")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -316,6 +359,18 @@ def main(argv=None):
     all_command.add_argument("--explain", action="store_true", help=EXPLAIN_HELP)
     all_command.add_argument("--debug", action="store_true", help=DEBUG_HELP)
     all_command.add_argument("--config", metavar="FILE", help=CONFIG_HELP)
+    capture_command = commands.add_parser("capture", help="record a trace on the target and check it")
+    capture_command.add_argument("--seconds", required=True, type=seconds_arg, help="how long to trace")
+    capture_command.add_argument("--out", required=True, metavar="PREFIX", help="writes PREFIX.kev, .txt and .json")
+    capture_command.add_argument("--run", metavar="COMMAND", help="shell command to run on the target during the trace")
+    capture_command.add_argument("--settle", type=settle_arg, default=2, metavar="SECONDS", help=SETTLE_HELP)
+    capture_command.add_argument("--target", metavar="USER@HOST[:PORT]", help=CAPTURE_TARGET_HELP)
+    capture_command.add_argument("--force", action="store_true", help="replace existing output files")
+    capture_command.add_argument("--html", metavar="FILE", help="also write an HTML report")
+    capture_command.add_argument("--explain", action="store_true", help=EXPLAIN_HELP)
+    capture_command.add_argument("--debug", action="store_true", help=DEBUG_HELP)
+    capture_command.add_argument("--config", metavar="FILE", help=CONFIG_HELP)
+    capture_command.set_defaults(summary=None)
     args = parser.parse_args(argv)
 
     if args.debug:
@@ -329,6 +384,8 @@ def main(argv=None):
             print(f"kevlint: {error}", file=sys.stderr)
             return finish([Entry(args.config, error=str(error))], args.summary)
     explainer = make_explainer(args.explain)
+    if args.command == "capture":
+        return run_capture(args, argv, explainer, config)
     if args.command == "check-all":
         return check_all(args.list, args.reports_dir, args.summary, explainer, config)
     return finish([check_trace(args.trace, args.html, explainer, config)], args.summary)
