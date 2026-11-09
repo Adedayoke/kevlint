@@ -50,6 +50,10 @@ rules, built on QNX semantics. It reads the instrumented kernel's trace directly
 time in message-passing states such as `THSEND` and `THREPLY`, and recognizes priority
 inheritance when a holder is boosted.
 
+Where those tools are commercial products, kevlint makes the core check free and automatic:
+every pull request can check a recorded trace for high-priority threads held up by
+lower-priority work, and say exactly what it evaluated.
+
 **Contents:** [Quick start](#quick-start) ·
 [How it works](#how-it-works) ·
 [Rules and config](#rules-and-config) ·
