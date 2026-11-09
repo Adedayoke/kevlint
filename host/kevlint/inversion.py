@@ -7,6 +7,8 @@ on the CPU where the holder last ran, while the holder was in THREADY.
 The trace never names a holder. It is inferred as the thread whose post or
 unlock on the same sync object in the same process released the waiter, so a
 block with no visible release cannot be evaluated and is counted separately.
+The release can be logged just before the block: with the holder on another CPU,
+its unlock can land between the waiter's lock call and the waiter's THMUTEX event.
 """
 from bisect import bisect_left
 from collections import Counter, defaultdict
@@ -150,6 +152,7 @@ def _scan(trace):
     runs = []
     last_run_on_cpu = {}
     history = defaultdict(list)
+    latest_release = {}
 
     for index, event in enumerate(trace.events):
         if event.cls == "KER_CALL":
@@ -162,6 +165,7 @@ def _scan(trace):
             if kind is None:
                 continue
             sync_p = event.fields.get("sync_p")
+            latest_release[(thread[0], kind, sync_p)] = (thread, event, index)
             for block in open_blocks.values():
                 if (
                     block.kind == kind
@@ -200,6 +204,11 @@ def _scan(trace):
                 call if matches else None,
                 last_call_index.get(thread) if matches else None,
             )
+            if matches:
+                released = latest_release.get((thread[0], event.name, call.fields.get("sync_p")))
+                # Only a release after this wait call can be the one that freed it.
+                if released is not None and released[2] > block.wait_index and released[0] != thread:
+                    block.holder, block.release = released[0], released[1]
             open_blocks[thread] = block
             blocks.append(block)
 

@@ -522,7 +522,8 @@ def markers(item, middle_label="middle first ran"):
     rows = [("block start", item.start_cycles, item.block_start_line)]
     if item.middle_cycles is not None:
         rows.append((middle_label, item.middle_cycles, item.middle_line))
-    rows.append(("release", item.release_cycles, item.release_line))
+    # The release can be logged just before the block event, off the left of the lanes.
+    rows.append(("release", max(item.release_cycles, item.start_cycles), item.release_line))
     rows.append(("block end", item.end_cycles, item.block_end_line))
     return [(number, *row) for number, row in enumerate(rows, 1)]
 
