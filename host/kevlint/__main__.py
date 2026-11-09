@@ -333,6 +333,7 @@ def run_capture(args, argv, explainer, config):
         settle=args.settle,
         force=args.force,
         command_line=shlex.join(["kevlint", *words]),
+        check_kevlintd=args.check_kevlintd,
     )
     try:
         trace_path = capture(options)
@@ -366,6 +367,11 @@ def main(argv=None):
     capture_command.add_argument("--settle", type=settle_arg, default=2, metavar="SECONDS", help=SETTLE_HELP)
     capture_command.add_argument("--target", metavar="USER@HOST[:PORT]", help=CAPTURE_TARGET_HELP)
     capture_command.add_argument("--force", action="store_true", help="replace existing output files")
+    capture_command.add_argument(
+        "--check-kevlintd",
+        action="store_true",
+        help="require kevlintd on the target and record its status in the .json file",
+    )
     capture_command.add_argument("--html", metavar="FILE", help="also write an HTML report")
     capture_command.add_argument("--explain", action="store_true", help=EXPLAIN_HELP)
     capture_command.add_argument("--debug", action="store_true", help=DEBUG_HELP)

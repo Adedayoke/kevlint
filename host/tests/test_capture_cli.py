@@ -293,3 +293,26 @@ class WarningTest(FakeTargetCase):
         env = {**self.env, "QNX_HOST": ""}
         with self.assertRaises(CaptureError):
             capture(Options(seconds="1", out=self.prefix), env)
+
+
+class CheckKevlintdTest(FakeTargetCase):
+    def test_status_is_printed_and_recorded(self):
+        done = self.capture("--check-kevlintd", FAKE_KEVLINTD="ok")
+        self.assertIn("kevlintd status:", done.stdout)
+        self.assertIn("markers_written: 3", done.stdout)
+        recorded = json.loads(Path(self.prefix + ".json").read_text())
+        self.assertIn("markers_written: 3", recorded["kevlintd_status"])
+
+    def test_missing_kevlintd_fails_before_tracing(self):
+        done = self.capture("--check-kevlintd")
+        self.assertEqual(done.returncode, 2)
+        self.assertIn("kevlintd is not running", done.stderr)
+        self.assertIn("--check-kevlintd", done.stderr)
+        self.assert_no_output()
+        self.assertFalse(any("tracelogger -w" in row[-1] for row in self.calls("ssh")))
+
+    def test_status_is_not_read_without_the_flag(self):
+        done = self.capture()
+        self.assertFalse(any("/dev/kevlint" in row[-1] for row in self.calls("ssh")))
+        self.assertNotIn("kevlintd", Path(self.prefix + ".json").read_text())
+        self.assertEqual(done.returncode, 1)

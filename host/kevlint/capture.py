@@ -33,6 +33,7 @@ LOG_TAIL = 20
 DECODE_TIMEOUT = 120
 GIT_TIMEOUT = 10
 START_SSHD = "sh /data/home/root/start_ssh.sh"
+KEVLINTD_STATUS = "/dev/kevlint/status"
 
 # The port answered and then dropped us. QEMU's port forward accepts the
 # connection itself, so a stopped sshd looks like this rather than a refusal.
@@ -181,6 +182,22 @@ class Session:
                 f"tracelogger was not found on {self.target}. It must be in the target image "
                 "and on the PATH of a non-interactive ssh session."
             )
+
+    def kevlintd_status(self):
+        """Return kevlintd's status text, or raise if it is not running."""
+        done = self._run(
+            self.ssh_argv(shlex.join(["cat", KEVLINTD_STATUS])),
+            PREFLIGHT_TIMEOUT,
+            "reading the kevlintd status",
+        )
+        if done.returncode == SSH_FAILED:
+            raise CaptureError(ssh_problem(self.target, done.stderr))
+        if done.returncode != 0 or not done.stdout.startswith("version: "):
+            raise CaptureError(
+                f"kevlintd is not running on {self.target}: could not read {KEVLINTD_STATUS}. "
+                "Fix: start kevlintd on the target, or leave out --check-kevlintd."
+            )
+        return done.stdout
 
     def run_script(self, script, timeout):
         done = self._run(self.ssh_argv(script), timeout, "capturing")
@@ -384,11 +401,13 @@ class Options:
     force: bool = False
     command_line: str = ""
     workload_grace: int = WORKLOAD_GRACE
+    check_kevlintd: bool = False
 
 
-def metadata(options, target, kev, report):
+def metadata(options, target, kev, report, kevlintd_status=None):
     commit, dirty = git_info()
     finished = report.status.get("workload_status")
+    extra = {} if kevlintd_status is None else {"kevlintd_status": kevlintd_status}
     return {
         "capture_command": tracelogger_command(options.seconds, kev),
         "workload_command": options.run,
@@ -400,6 +419,7 @@ def metadata(options, target, kev, report):
         "target": str(target),
         "settle_seconds": options.settle if options.run is not None else None,
         "workload_status": finished,
+        **extra,
     }
 
 
@@ -424,9 +444,13 @@ def capture(options, environ=None):
     log = f"/tmp/kevlint_{name}.log"
     local = {suffix: os.path.join(work, f"capture.{suffix}") for suffix in paths}
     started = False
+    kevlintd_status = None
     try:
         print(f"kevlint capture: connecting to {target}", flush=True)
         session.preflight()
+        if options.check_kevlintd:
+            kevlintd_status = session.kevlintd_status()
+            print(f"kevlintd status:\n{kevlintd_status.rstrip()}", flush=True)
         settle = options.settle if options.run is not None else 0
         print(f"kevlint capture: tracing for {options.seconds} s", flush=True)
         script = remote_script(options.run, options.seconds, settle, kev, log, options.workload_grace)
@@ -440,7 +464,7 @@ def capture(options, environ=None):
         session.copy(kev, local["kev"])
         decode(local["kev"], local["txt"])
         with open(local["json"], "w", encoding="utf-8") as out:
-            json.dump(metadata(options, target, kev, report), out, indent=2)
+            json.dump(metadata(options, target, kev, report, kevlintd_status), out, indent=2)
             out.write("\n")
         for suffix, path in paths.items():
             os.replace(local[suffix], path)

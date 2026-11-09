@@ -42,6 +42,12 @@ def ssh(args):
     if mode == "lost" and capturing:
         print("client_loop: send disconnect: Broken pipe", file=sys.stderr)
         return 255
+    if "/dev/kevlint/status" in remote:
+        if os.environ.get("FAKE_KEVLINTD") == "ok":
+            print("version: 0.1.0\nuptime_s: 7\nmarkers_written: 3\nmarkers_rejected: 0\nopen_files: 1")
+            return 0
+        print("cat: /dev/kevlint/status: No such file or directory", file=sys.stderr)
+        return 1
     env = dict(os.environ, PATH=f"{root()}/remote_bin:/usr/bin:/bin")
     return subprocess.run(["sh", "-c", sandboxed(remote)], env=env, stdin=subprocess.DEVNULL).returncode
 
