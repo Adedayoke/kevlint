@@ -59,7 +59,7 @@ state name exits 2, so a typo cannot silently turn a check off.
 A budget counts time in `THSEM` and `THMUTEX` unless `states` lists others, such
 as `THSEND` or `THREPLY`. A breach is strictly longer than `max_ms`. If a budget's
 thread is not in a trace, that budget is `NOT EVALUATED` with a warning, or exit 2
-with `required = true`. The 50 ms in the sample suits the QEMU demos only: QEMU
+with `required = true`. The 100 ms in the sample suits the QEMU demos only: QEMU
 timing is not realistic, so set real budgets from traces of the real target.
 
 ## Capturing from a target

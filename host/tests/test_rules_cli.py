@@ -55,18 +55,18 @@ class SampleConfigTest(unittest.TestCase):
             "RULE no-semaphore-high-priority: FAIL",
             "RESULTS BY RULE",
             "priority-inversion: FAIL, 10 finding(s)",
-            "max-blocked-time: FAIL, 11 finding(s)",
+            "max-blocked-time: FAIL, 10 finding(s)",
             "no-semaphore-high-priority: FAIL, 11 finding(s)",
-            "FAIL: 32 finding(s) across 3 rule(s)",
+            "FAIL: 31 finding(s) across 3 rule(s)",
             "ROOT CAUSES",
-            "32 findings from 3 rules, all from 1 root cause: fusion_rt blocking on semaphore 0x0000001f5d627018",
+            "31 findings from 3 rules, all from 1 root cause: fusion_rt blocking on semaphore 0x0000001f5d627018",
             "- fusion_rt blocking on semaphore 0x0000001f5d627018: priority-inversion 10, "
-            "max-blocked-time 11, no-semaphore-high-priority 11",
-            "BREACH 1 of 11",
+            "max-blocked-time 10, no-semaphore-high-priority 11",
+            "BREACH 1 of 10",
             "FINDING 11 of 11",
             "at least 52.195 ms (still open at trace end)",
             "lines:   wait call 1172, block start 1177, release 6175, block end 6179",
-            "budget fusion_rt: 50 ms on THSEM, THMUTEX: FAIL, 11 breach(es)",
+            "budget fusion_rt: 100 ms on THSEM, THMUTEX: FAIL, 10 breach(es)",
         ):
             self.assertIn(wanted, done.stdout)
 
@@ -95,14 +95,14 @@ class SampleConfigTest(unittest.TestCase):
             page = (Path(folder) / "demo_inversion.html").read_text()
         self.assertEqual(done.returncode, 1)
         self.assertIn("### kevlint results by rule", text)
-        self.assertIn("| `max-blocked-time` | ❌ FAIL | 11 |", text)
+        self.assertIn("| `max-blocked-time` | ❌ FAIL | 10 |", text)
         self.assertIn("| `no-semaphore-high-priority` | ❌ FAIL | 11 |", text)
         self.assertEqual(text.count("| `priority-inversion` |"), 2)
-        self.assertIn("`fusion_rt` exceeded its 50 ms budget 11 times", text)
+        self.assertIn("`fusion_rt` exceeded its 100 ms budget 10 times", text)
         self.assertIn("`fusion_rt` blocked on a semaphore at high priority 11 times", text)
         self.assertIn('id="rule-max-blocked-time"', page)
         self.assertIn("#### Root causes in", text)
-        self.assertIn("**32 findings from 3 rules, all from 1 root cause:", text)
+        self.assertIn("**31 findings from 3 rules, all from 1 root cause:", text)
         self.assertNotIn("ROOT CAUSES", done.stdout.split("demo_inversion")[0])
 
 

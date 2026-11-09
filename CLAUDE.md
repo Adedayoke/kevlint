@@ -102,7 +102,8 @@ found.
   - A missing thread gives NOT EVALUATED with a warning, never PASS, and does not
     affect the exit status. With `required = true` it exits 2.
   - This is an absolute threshold and QEMU timing is not realistic: the sample's
-    50 ms suits the demos only.
+    100 ms suits the demos only. It was raised from 50 ms because mutex-mode blocks reached
+    65 ms under load; inversion blocks stay above it.
 - `no-semaphore-high-priority`: `enabled`, `min_priority`. Flags every entry to
   THSEM at or above the threshold, using the priority on that event. It needs no
   wait call or completed block. On the demos, 40 flags only `fusion_rt`, while
