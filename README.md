@@ -17,7 +17,9 @@ while the holder was in `THREADY`.
 - **Holders are inferred, not named by the trace.** Each one is the thread whose
   post or unlock on the same sync object released the waiter.
 - **A pass is not full coverage.** Blocks with no matching wait call or no visible
-  release cannot be evaluated. Every result states how many were not evaluated.
+  release cannot be evaluated. Blocks in `THRWLOCK_WRITE`, `THRWLOCK_READ` and
+  `THMUON_MUTEX` are not checked and are counted as not evaluated, with the state
+  named. Every result states how many were not evaluated.
 
 ## Command line
 
@@ -181,11 +183,45 @@ to the job summary. It installs and uses its own Python 3.12, and leaves the job
 writes the results to the job summary. To check another trace, add its path to
 that file.
 
+## Validation
+
+kevlint was run on real traces of ordinary QNX 8.0 activity under QEMU, with no demo
+workload: idle (5 s), a busy filesystem with `find` and `cp` (5 s), network traffic with
+`curl` and `ping` (5 s), a mix of all of these (1 s), and two 30-second mixed captures. Two
+are kept as the fixtures `system_idle` and `system_busy`. Nothing crashed. The longest,
+1.5 million events and 215 MB of text, took about 20 seconds and 0.9 GB of memory.
+
+- **Structural rules: zero findings.** `priority-inversion` found no violation in 3,630
+  evaluated blocks, and `no-semaphore-high-priority` flagged none of 296 `THSEM` entries.
+  This is not full coverage: 19,292 blocks were not evaluated, mostly `THRWLOCK_WRITE`,
+  with no wait to check.
+- **`max-blocked-time`: 26 findings, none a kevlint error, from 100 ms budgets chosen for
+  this test.** Thirteen on `softirq_0` are false positives from that choice: it is an idle
+  worker that waits on a semaphore for seconds between wakeups. Thirteen on `fsys_resmgr`
+  (111–355 ms) are real waits on the disk path, released by `eide_driver_thread` or by a
+  thread that had itself waited on it. They are not defects, since emulated disk timing
+  says little about real hardware.
+
+The run found and fixed these bugs:
+
+- A `tracelogger` run that filled the disk still exited 0, so a 30-second capture that
+  stopped at 23 seconds printed PASS. Such a capture now exits 2.
+- An unlock logged just before the waiter's block event was missed, so those blocks were
+  wrongly reported as having no visible release.
+- `THCREATE` from the state dump at trace start split one block into two.
+- Blocks already running when the trace began were printed as exact lengths. They now
+  say "at least".
+- The inversion rule scanned every run for every block, taking 43 s on a 1.35M-event
+  trace. It now takes 11 s.
+- Blocks in `THRWLOCK_WRITE`, `THRWLOCK_READ` and `THMUON_MUTEX` were left out of the
+  coverage counts, so a PASS hid them. They now count as not evaluated.
+
 ## Limitations
 
-- The rules look only at `THSEM` and `THMUTEX`. Time blocked in other lock states,
-  such as `THRWLOCK_WRITE` and `THMUON_MUTEX` (common in real traces, especially
-  `io-sock`), is neither checked nor counted as "not evaluated".
+- `priority-inversion` checks only `THSEM` and `THMUTEX`. Other lock states are
+  counted as not evaluated and can outnumber the evaluated blocks on a busy system
+  (mostly `THRWLOCK_WRITE` in `io-sock`). A `THMUON_MUTEX` block at priority 254 also
+  triggers the warning that a not-evaluated block outranks every evaluated waiter.
 - Running `tracelogger` above the workload's priority makes its own threads appear
   in the trace (it trips `no-semaphore-high-priority`), so `kevlint capture` runs it
   at default priority.

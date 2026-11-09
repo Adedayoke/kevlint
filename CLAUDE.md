@@ -121,6 +121,11 @@ found.
   A finding with no visible sync object groups by thread and state, so it never
   merges with a known one. The headline and list appear only when findings from
   at least two rules share a cause. This is a grouping, not proof of one cause.
+- `THRWLOCK_WRITE`, `THRWLOCK_READ` and `THMUON_MUTEX` count as not evaluated with the
+  state named: on the inversion rule for any waiter at or above the minimum, and on a
+  budget for its own threads when the state is not in `states`. They feed the
+  not-evaluated warning, so a priority 254 `THMUON_MUTEX` (kernel clock thread) can
+  trigger it on a healthy trace. They are in `TRACKED_STATES`, not in `BLOCKING_STATES`.
 - Each rule's coverage has three categories:
   - Evaluated.
   - Not evaluated, with a reason: a real coverage gap.
@@ -261,7 +266,7 @@ print the key.
 ### Open TODOs
 - Condvar coverage: about 38 mutex re-acquires per trace after
   `SYNC_CONDVAR_WAIT/82` are not evaluated, because no wait call matches them.
-- Other blocking lock states: `THRWLOCK_WRITE`/`READ` (`SYNC_RWLOCK/77`) and
-  `THMUON_MUTEX` are in real traces, and are neither evaluated nor counted as not
-  evaluated. Headers confirm they exist; their behavior is not documented here.
+- Evaluate `THRWLOCK_WRITE`/`READ` (`SYNC_RWLOCK/77`) and `THMUON_MUTEX`: today they
+  are only counted as not evaluated. Headers confirm they exist; their behavior is not
+  documented here, so ask before modeling them.
 - Memory: about 580 bytes per trace event in RSS (900 MB for a 1.5M-event 30 s trace).
