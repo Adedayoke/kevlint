@@ -169,3 +169,9 @@ Python 3.12.
 `ci/traces.txt`. It uploads the HTML reports as the `kevlint-reports` artifact and
 writes the results to the job summary. To check another trace, add its path to
 that file.
+
+## Limitations
+
+- Running `tracelogger` above the workload's priority makes its own threads appear
+  in the trace (it trips `no-semaphore-high-priority`), so `kevlint capture` runs it
+  at default priority.
