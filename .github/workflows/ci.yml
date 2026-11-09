@@ -53,8 +53,32 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: ./
+      # 3.10 has no tomllib, so --config below only works if the action brings its
+      # own Python. The last step checks that this one is left on the PATH.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+
+      - name: Action passes a clean trace with a config
+        uses: ./
         with:
           trace: fixtures/demo_fixed.txt
           report: reports/demo_fixed.html
           config: kevlint.toml
+
+      - name: Action fails a trace with a violation
+        id: failing
+        continue-on-error: true
+        uses: ./
+        with:
+          trace: fixtures/demo_inversion.txt
+          report: reports/demo_inversion.html
+
+      - name: Check what the action did
+        env:
+          FAILING_OUTCOME: ${{ steps.failing.outcome }}
+        run: |
+          test -s reports/demo_fixed.html
+          test -s reports/demo_inversion.html
+          test "$FAILING_OUTCOME" = failure
+          python3 --version | grep '^Python 3\.10'

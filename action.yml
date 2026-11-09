@@ -17,10 +17,20 @@ inputs:
 runs:
   using: composite
   steps:
+    # kevlint is tested on 3.12 and --config needs 3.11 or newer. The job's own python3
+    # is left alone: update-environment keeps this Python off the caller's PATH.
+    - name: Set up Python for kevlint
+      id: python
+      uses: actions/setup-python@v7
+      with:
+        python-version: "3.12"
+        update-environment: false
+
     - name: Run kevlint
       shell: bash
       env:
         PYTHONPATH: ${{ github.action_path }}/host
+        KEVLINT_PYTHON: ${{ steps.python.outputs.python-path }}
         KEVLINT_TRACE: ${{ inputs.trace }}
         KEVLINT_REPORT: ${{ inputs.report }}
         KEVLINT_CONFIG: ${{ inputs.config }}
@@ -28,7 +38,8 @@ runs:
         mkdir -p "$(dirname "$KEVLINT_REPORT")"
         config_args=()
         if [ -n "$KEVLINT_CONFIG" ]; then config_args=(--config "$KEVLINT_CONFIG"); fi
-        python3 -m kevlint check "$KEVLINT_TRACE" \
+        "$KEVLINT_PYTHON" --version
+        "$KEVLINT_PYTHON" -m kevlint check "$KEVLINT_TRACE" \
           --html "$KEVLINT_REPORT" \
           --summary "$GITHUB_STEP_SUMMARY" \
           "${config_args[@]}"
