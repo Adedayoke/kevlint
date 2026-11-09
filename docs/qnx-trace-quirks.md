@@ -40,6 +40,22 @@ t:0x2cf92c9394fb CPU:00 USREVENT        :EVENT:100         , d0:0x61616161 d1:0x
 t:0x2cf92c9a2582 CPU:00 USREVENT        :EVENT:100          STR:"aaa...255 characters...aaa", d0:0x61616161 ...
 ```
 
+### `trace_logf()` and `trace_nlogf()`
+
+`trace_logf(code, "%s", buf)` and `trace_nlogf(code, 0, "%s", buf)` behave the same
+way. In one run with `TraceEvent` as a control, at 7, 8, 9, 16 and 256 bytes, in wide
+and fast mode, all three decoded identically: no `STR:` at 8 and 16 bytes, and 255
+characters at 256 bytes. Their help pages say they call `TraceEvent()`.
+
+The help pages say they return the number of bytes written, including the terminator,
+and that a `max` of 0 means no limit. At 256 bytes both returned 257, although only
+255 characters decoded. Switching to them would not help kevlintd.
+
+### Documentation
+
+The SDP's `TraceEvent()` help page gives no maximum length for
+`_NTO_TRACE_INSERTUSRSTREVENT`.
+
 ### How it was measured
 
 1. A probe wrote strings under `tracelogger -w -s 2` and printed each return value,
