@@ -59,6 +59,9 @@ found.
 - `kevlint capture` (`capture.py`): traces on the target over the system ssh and
   scp, decodes on the host, writes `name.kev`, `.txt`, `.json`, then runs the normal
   check. Tests use `host/tests/fake_target.py`.
+- `target/kevlintd.c`: resource manager for `/dev/kevlint/marker` and
+  `/dev/kevlint/status`. Host side: markers in `parser.py` and `usermarks.py`, shown in
+  the terminal and HTML report. `capture --check-kevlintd` reads the status first.
 - Demo PR #1 (`demo/introduce-inversion`) is red on purpose. It must NEVER be
   merged: it would turn `main` red.
 
@@ -133,6 +136,26 @@ found.
 - `run_demo.sh` cannot be a `--run` workload: it starts its own `tracelogger`.
 - Verdict reproduction is structural (exit status and the threads involved), since
   violation counts can vary between runs.
+
+### kevlintd and markers
+- User string events lose their text at lengths that are multiples of 8 and are cut
+  at 255 bytes, and `TraceEvent` still returns 0: see `docs/qnx-trace-quirks.md`.
+  kevlintd adds a pid/tid prefix and pads with one space to avoid those lengths.
+- Marker text is at most 128 bytes of printable ASCII, and an over-long write is
+  rejected whole. Markers are event number 100, kept apart from `trace.events`
+  because they have no pid or tid fields.
+- The channel uses `_NTO_CHF_INHERIT_RUNMASK` and the default priority inheritance.
+  Never `_NTO_CHF_FIXED_PRIORITY`: a marker from a high-priority thread could then
+  wait behind lower-priority work. In the only placement test, on an idle system, a
+  default channel placed kevlintd on the client's CPU too, so the flag's benefit is
+  unproven. `-r mask` pins kevlintd instead.
+- A marker is a blocking message, so demo markers ("lock taken", "lock released") stay
+  outside the waiter's block, and the hog writes none. Markers are context, not
+  evidence of cause. They never go to `--explain`, the Markdown summary, or a verdict.
+  Other rules show them in the terminal only.
+- The HTML timeline widens by at most 25% of the block's length to show a marker just
+  outside it. Traces without markers must keep byte-identical output.
+- `markers_written` counts accepted markers: `TraceEvent` returns 0 with no logger.
 
 ### `--explain` design
 - Never affects the verdict: explanations run after it is printed, and any

@@ -100,6 +100,35 @@ Two guards stop a trace without the workload from passing:
 | 1 | At least one violation |
 | 2 | A trace, list, config or output file could not be used, a capture failed, or a required thread is missing |
 
+## Trace markers with kevlintd
+
+`kevlintd` is a QNX resource manager in `target/`. Each write to
+`/dev/kevlint/marker` becomes one user event in the kernel trace, with the writer's
+pid and tid added by `kevlintd`, and `/dev/kevlint/status` reports its version,
+uptime and counters. Start it on the target before tracing. It puts itself in the
+background (`-f` keeps it in the foreground):
+
+```sh
+./kevlintd
+echo "starting calibration" > /dev/kevlint/marker
+cat /dev/kevlint/status
+```
+
+Marker text is at most 128 bytes of printable ASCII. A longer write fails with
+`EMSGSIZE` and other bytes with `EINVAL`; one trailing newline is allowed. A write
+sends a message to `kevlintd`, so it affects scheduling. Keep markers sparse and
+outside the blocks you want to measure. `markers_written` counts markers handed to
+the kernel, including when no trace was running.
+
+`check` shows the nearest marker before a block, and the HTML timeline shows markers
+in and just around the block. Markers are context from the workload, not evidence of
+cause, and they never change a verdict. They are not sent to `--explain` and do not
+appear in the Markdown summary. The fusion demo writes them with `--markers`.
+
+`capture --check-kevlintd` exits 2 if `kevlintd` is not running on the target, and
+otherwise records its status in `name.json`. Behavior measured for user events is in
+[docs/qnx-trace-quirks.md](docs/qnx-trace-quirks.md).
+
 ## GitHub Action
 
 Other repositories can run kevlint on a committed `traceprinter` text file:
