@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from .config import BLOCKING_STATES, INVERSION, MAX_BLOCKED, NO_SEMAPHORE
 from .explain import SYNC_OBJECT
 from .inversion import _scan, check
+from .timeline import NOT_A_STATE
 
 PASS = "PASS"
 FAIL = "FAIL"
@@ -165,6 +166,8 @@ def collect_waits(trace):
     waits = []
     for event in trace.events:
         if event.cls != "THREAD":
+            continue
+        if event.name in NOT_A_STATE:
             continue
         thread = event.thread
         wait = current.get(thread)

@@ -14,6 +14,8 @@ from bisect import bisect_left
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
+from .timeline import NOT_A_STATE
+
 HOLDER_NOTE = "inferred, not named by the trace"
 BELOW_MINIMUM = "waiter below the configured minimum priority"
 TYPICAL_FIXES = {
@@ -190,6 +192,8 @@ def _scan(trace):
             last_run_on_cpu[event.cpu] = run
 
         block = open_blocks.get(thread)
+        if event.name in NOT_A_STATE:
+            continue
         if block is not None and event.name != block.kind:
             block.end_index, block.end = index, event
             del open_blocks[thread]

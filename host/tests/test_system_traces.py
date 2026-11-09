@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from kevlint.inversion import _scan, check
 from kevlint.parser import Event, Trace, parse_trace
 from kevlint.report import markers
+from kevlint.rules import collect_waits
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "fixtures"
@@ -94,6 +95,23 @@ class ReleaseMarkerTest(unittest.TestCase):
         )
         labels = {row[1]: row[2] for row in markers(item)}
         self.assertEqual(labels["release"], 100)
+
+
+class StatusEventsTest(unittest.TestCase):
+    """THCREATE says a thread exists, so it must not end a block."""
+
+    def test_no_block_or_wait_ends_at_thcreate(self):
+        for name in ("system_idle", "system_busy"):
+            trace = fixture(name)
+            for block in _scan(trace)[0]:
+                self.assertTrue(block.end is None or block.end.name != "THCREATE", block)
+            for wait in collect_waits(trace):
+                self.assertTrue(wait.end is None or wait.end.name != "THCREATE", wait)
+
+    def test_block_continues_across_the_state_dump(self):
+        trace = fixture("system_idle")
+        waits = [w for w in collect_waits(trace) if w.thread == (71454742, 4)]
+        self.assertEqual((waits[0].start.line, waits[0].end.line), (204, 787))
 
 
 if __name__ == "__main__":
