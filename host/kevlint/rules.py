@@ -13,6 +13,7 @@ NOT_EVALUATED = "NOT EVALUATED"
 ERROR = "ERROR"
 
 OPEN_WITHIN_BUDGET = "block still open when the trace ended, within budget so far"
+STARTED_WITHIN_BUDGET = "block already in progress when the trace started, within budget so far"
 
 
 @dataclass
@@ -23,6 +24,7 @@ class Wait:
     state: str
     start: object
     end: object = None
+    start_unknown: bool = False  # Already blocked when the trace started.
 
 
 @dataclass
@@ -38,6 +40,18 @@ class Finding:
     holder: tuple = None
     release_call: str = None
     budget_ms: float = None
+    start_unknown: bool = False  # Already blocked when the trace started.
+
+
+def partial_note(end_missing, start_unknown):
+    """Why a measured length is only a lower bound, or None if it is exact."""
+    if end_missing and start_unknown:
+        return "blocked for the whole trace"
+    if start_unknown:
+        return "already blocked when the trace started"
+    if end_missing:
+        return "still open at trace end"
+    return None
 
 
 @dataclass
@@ -49,6 +63,7 @@ class BlockBar:
     still_open: bool
     start_cycles: int
     start_line: int
+    start_unknown: bool = False
 
 
 @dataclass
@@ -164,12 +179,17 @@ def collect_waits(trace):
     """Return every stretch any thread spent in a blocking state, in trace order."""
     current = {}
     waits = []
+    seen = set()
     for event in trace.events:
         if event.cls != "THREAD":
             continue
         if event.name in NOT_A_STATE:
             continue
         thread = event.thread
+        # A thread that starts inside the trace runs before it can block, so a
+        # blocking state as its first event means it was blocked before the trace.
+        first_state = thread not in seen
+        seen.add(thread)
         wait = current.get(thread)
         if wait is not None:
             if wait.state == event.name:
@@ -177,7 +197,7 @@ def collect_waits(trace):
             wait.end = event
             del current[thread]
         if event.name in BLOCKING_STATES:
-            wait = Wait(thread, event.name, event)
+            wait = Wait(thread, event.name, event, start_unknown=first_state)
             current[thread] = wait
             waits.append(wait)
     return waits
@@ -218,6 +238,7 @@ def _finding(trace, wait, blocks, budget_ms=None):
         holder,
         release_call,
         budget_ms,
+        wait.start_unknown,
     )
 
 
@@ -248,13 +269,20 @@ def _check_budget(trace, budget, threads, waits, blocks, rule):
         if wait.thread not in threads or wait.state not in budget.states:
             continue
         millis = _ms(trace, _duration(trace, wait))
-        if wait.end is None and millis <= budget.max_ms:
-            rule.not_evaluated[OPEN_WITHIN_BUDGET] += 1
+        if millis <= budget.max_ms and (wait.end is None or wait.start_unknown):
+            rule.not_evaluated[STARTED_WITHIN_BUDGET if wait.start_unknown else OPEN_WITHIN_BUDGET] += 1
             continue
         row.evaluated += 1
         row.worst_ms = millis if row.worst_ms is None else max(row.worst_ms, millis)
         row.blocks.append(
-            BlockBar(millis, millis > budget.max_ms, wait.end is None, wait.start.cycles, wait.start.line)
+            BlockBar(
+                millis,
+                millis > budget.max_ms,
+                wait.end is None,
+                wait.start.cycles,
+                wait.start.line,
+                wait.start_unknown,
+            )
         )
         if millis > budget.max_ms:
             row.breaches += 1

@@ -26,6 +26,7 @@ from .report import render_html
 from .rules import (
     line_text,
     overall_status,
+    partial_note,
     root_cause_headline,
     root_cause_text,
     root_causes,
@@ -176,11 +177,8 @@ def print_finding(trace, label, number, total, finding, out):
         f"{finding.state}{where}",
         file=out,
     )
-    blocked = (
-        f"{millis:.3f} ms"
-        if finding.end_cycles is not None
-        else f"at least {millis:.3f} ms (still open at trace end)"
-    )
+    note = partial_note(finding.end_cycles is None, finding.start_unknown)
+    blocked = f"{millis:.3f} ms" if note is None else f"at least {millis:.3f} ms ({note})"
     if finding.budget_ms is not None:
         blocked += f", budget {finding.budget_ms:g} ms, over by {millis - finding.budget_ms:.3f} ms"
     print(f"    blocked: {blocked}", file=out)

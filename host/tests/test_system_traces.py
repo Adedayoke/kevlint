@@ -1,12 +1,16 @@
 """Rules and parsing against real traces of ordinary QNX activity, with no demo workload."""
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+from kevlint.config import Budget, Config
 from kevlint.inversion import _scan, check
 from kevlint.parser import Event, Trace, parse_trace
 from kevlint.report import markers
-from kevlint.rules import collect_waits
+from kevlint.rules import STARTED_WITHIN_BUDGET, collect_waits, run_rules
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "fixtures"
@@ -112,6 +116,56 @@ class StatusEventsTest(unittest.TestCase):
         trace = fixture("system_idle")
         waits = [w for w in collect_waits(trace) if w.thread == (71454742, 4)]
         self.assertEqual((waits[0].start.line, waits[0].end.line), (204, 787))
+
+
+class BlockedBeforeTheTraceTest(unittest.TestCase):
+    def rule(self, max_ms):
+        config = Config("sample", budgets=[Budget("softirq_0", max_ms)])
+        return run_rules(fixture("system_idle"), config)[-1]
+
+    def test_over_budget_is_a_lower_bound_breach(self):
+        rule = self.rule(100)
+        self.assertEqual(len(rule.findings), 1)
+        self.assertTrue(rule.findings[0].start_unknown)
+        self.assertIsNone(rule.findings[0].end_cycles)
+        self.assertTrue(rule.budgets[0].blocks[0].start_unknown)
+
+    def test_within_budget_is_not_evaluated(self):
+        rule = self.rule(10_000)
+        self.assertEqual(rule.findings, [])
+        self.assertEqual(rule.not_evaluated[STARTED_WITHIN_BUDGET], 1)
+        self.assertEqual(rule.evaluated, 0)
+
+    def test_start_unknown_only_when_the_thread_has_no_earlier_state(self):
+        for name in ("system_idle", "system_busy"):
+            trace = fixture(name)
+            earlier = {}
+            for event in trace.events:
+                if event.cls == "THREAD" and event.name != "THCREATE":
+                    earlier.setdefault(event.thread, event.line)
+            for wait in collect_waits(trace):
+                self.assertEqual(wait.start_unknown, earlier[wait.thread] == wait.start.line, wait)
+
+    def test_output_says_it_is_a_lower_bound(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "rules.toml"
+            config.write_text(
+                '[rules.max-blocked-time]\nbudgets = [{thread = "softirq_0", max_ms = 100}]\n',
+                encoding="utf-8",
+            )
+            report = Path(tmp) / "r.html"
+            done = subprocess.run(
+                [
+                    sys.executable, "-m", "kevlint", "check", str(FIXTURES / "system_idle.txt"),
+                    "--config", str(config), "--html", str(report),
+                ],
+                capture_output=True,
+                text=True,
+                env={"PYTHONPATH": str(ROOT / "host")},
+            )
+            self.assertEqual(done.returncode, 1, done.stderr)
+            self.assertIn("at least 4991.486 ms (blocked for the whole trace)", done.stdout)
+            self.assertIn("blocked for the whole trace", report.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
