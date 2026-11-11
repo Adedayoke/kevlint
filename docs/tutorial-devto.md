@@ -1,7 +1,9 @@
 ---
 title: Run QNX 8.0 on Windows with WSL2 and capture your first kernel trace
 published: false
+description: "Step by step: QNX 8.0 in QEMU on WSL2, fixing networking and SSH, and reading your first kernel trace."
 tags: qnx, wsl, embedded, tutorial
+cover_image: https://raw.githubusercontent.com/Adedayoke/kevlint/main/docs/images/tutorial-cover.png
 canonical_url: https://github.com/Adedayoke/kevlint/blob/main/docs/tutorial-qnx-wsl.md
 ---
 
