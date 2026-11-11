@@ -34,6 +34,41 @@ That run found and fixed real bugs:
 - Blocks in `THRWLOCK_WRITE`, `THRWLOCK_READ` and `THMUON_MUTEX` were missing from coverage
   counts, so a PASS hid them.
 
+## Markers do not cause findings
+
+A marker write is a blocking message to `kevlintd`, so tracing with markers could change the
+scheduling it records. To check that `kevlintd` never shows up as a cause, eight captures were
+run on 2026-11-11 with `kevlintd` running on the target: five of the inversion demo and three of
+the fixed demo, all with `--markers`. Each used the demo's default 30 s duration and a 3 s trace,
+with commit `ade044b`, a clean tree, `--config kevlint.toml` and `--check-kevlintd`. Every
+workload exited 0.
+
+```sh
+PYTHONPATH=host python3 -m kevlint capture --seconds 3 --out <prefix> --config kevlint.toml --check-kevlintd \
+  --run 'cd /tmp/kldev; ./control & ./fusion --inversion --markers & ./sensor & wait'
+```
+
+The fixed runs used `--fixed` in place of `--inversion`.
+
+| Capture | Exit | Findings, all rules | `priority-inversion` violations | Middle threads | Markers in trace | `kevlintd` in a finding |
+|---|---|---|---|---|---|---|
+| inversion 1 | 1 | 31 | 10 | `fusion_hog` ×10 | 21 | no |
+| inversion 2 | 1 | 31 | 10 | `fusion_hog` ×10 | 21 | no |
+| inversion 3 | 1 | 30 | 10 | `fusion_hog` ×10 | 20 | no |
+| inversion 4 | 1 | 29 | 9 | `fusion_hog` ×9 | 19 | no |
+| inversion 5 | 1 | 30 | 10 | `fusion_hog` ×10 | 20 | no |
+| fixed 1 | 0 | 0 (PASS) | 0 | none | 17 | no |
+| fixed 2 | 0 | 0 (PASS) | 0 | none | 21 | no |
+| fixed 3 | 0 | 0 (PASS) | 0 | none | 19 | no |
+
+- `fusion_hog`, the demo's intended middle thread, was the middle thread in all 49
+  `priority-inversion` violations.
+- `kevlintd` ran in every trace, with 19 to 24 `THRUNNING` events each, and was named in none of
+  the 151 findings, in any rule, as waiter, holder, middle or blocked thread.
+- **Limits.** Every marker came from `fusion_holder` at priority 10, and `kevlintd` always ran
+  at priority 10, so these runs do not test `kevlintd` serving a high-priority writer. They are
+  eight runs under QEMU, and the traces are not committed.
+
 ## Results on the committed fixtures
 
 Reproduce these with `check <trace> --config kevlint.toml`. Coverage is shown as evaluated / not
