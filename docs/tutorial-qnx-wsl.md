@@ -6,6 +6,7 @@ By the end of this tutorial you will have QNX 8.0 running in a virtual machine o
 |---|---|
 | **You need** | A Windows laptop. No QNX experience and no extra hardware. |
 | **Disk space** | About 7 GB free in WSL. The installer lists SDP 8.0 at about 6.4 GB; it took 3.5 GB on disk in our install. |
+| **Downloads** | For metered connections: the Ubuntu 24.04 WSL image is about 360 MB, the QNX Software Center installer about 100 MB, `qemu-system-x86` about 49 MB, and SDP 8.0 several GB (6.4 GB installed, per the installer). Skip the 20 GB Quick Start package: step 4 builds the image locally instead. |
 | **Memory** | The virtual machine uses 1 GB. This setup runs on a laptop with 8 GB of RAM. |
 | **Total time** | About 90 minutes, most of it in steps 1 to 3. Step times are estimates. |
 | **Cost** | Free: the QNX license is for personal, non-commercial use. |
@@ -319,6 +320,7 @@ QNX noname 8.0.0 2026/06/05-16:26:03EDT x86pc x86_64
 The `sshd` you just started doesn't survive a reboot. After every boot, run `sh /data/home/root/start_ssh.sh` on the console.
 
 > **Troubleshooting**
+> - **The paste comes out garbled, with `^M` characters or lines run together.** This happened on a first paste and worked on the second. Press Ctrl-C, then paste again one `cat` block at a time, from the `cat` line to its `EOF`, followed by the `chmod` and `sh` lines. Pasting a block again overwrites the file it writes. Check the result with `cat /data/home/root/sshd_nopam.conf`.
 > - **`Connection reset by 127.0.0.1 port 2222`.** Your `sshd` isn't running. On the console, run `cat /tmp/sshd.log` to see why, then `sh /data/home/root/start_ssh.sh`.
 > - **The log says `/usr/libexec/sshd-auth does not exist or is not executable`.** The snippets from step 4 aren't in your image. Add them, rebuild, boot, and repeat this step.
 > - **`Connection refused`.** QEMU itself isn't running. Start it with `~/qnxvm/run.sh`.
@@ -480,7 +482,12 @@ PASS: 0 violation(s) in 3 evaluated block(s); 58 block(s) not evaluated
 PYTHONPATH=host python3 -m kevlint check fixtures/demo_inversion.txt --html ~/traces/inversion.html
 ```
 
-**You should see** a last result line starting with `FAIL: 10 violation(s)`. Open the HTML report from Windows at `\\wsl$\Ubuntu-24.04\home\<your-linux-name>\traces\inversion.html` (**Unverified**: the path depends on your distribution name).
+**You should see** a last result line starting with `FAIL: 10 violation(s)`.
+
+Open the HTML report in your Windows browser in either of two ways:
+
+- From Ubuntu, run `explorer.exe ~/traces/inversion.html`.
+- Paste `\\wsl.localhost\Ubuntu-24.04\home\<your-linux-name>\traces\inversion.html` into the browser's address bar.
 
 > **Troubleshooting**
 > - **`No module named kevlint`.** Run the command from inside the `kevlint` folder, with `PYTHONPATH=host` at the front.
