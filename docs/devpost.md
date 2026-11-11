@@ -68,9 +68,11 @@ timings, so only the contrast between them means anything.
   high-priority thread could wait behind lower-priority work and cause the very inversion kevlint
   looks for. The channel also sets `_NTO_CHF_INHERIT_RUNMASK` to run on the writer's CPU, but in
   my only placement test a default channel did the same, so that flag's benefit is unproven. The
-  demo writes its markers outside the waiter's block. In the two committed marker captures,
-  `kevlintd` appears in the trace but in none of the 30 findings: every intermediate thread is the
-  demo's own `fusion_hog`.
+  demo writes its markers outside the waiter's block. In 8 live captures with markers (5 of the
+  inversion demo, 3 of the fixed one), `kevlintd` ran in every trace but appeared in none of the
+  151 findings. The demo's own `fusion_hog` was the intermediate thread in all 49 inversion
+  violations, and all 3 fixed runs passed
+  ([results](https://github.com/Adedayoke/kevlint/blob/main/docs/validation.md#markers-do-not-cause-findings)).
 - **Host (Python 3, standard library only).** A parser for `traceprinter` output, the three rules,
   the reports, the capture command, and the LLM client, which uses plain `urllib`.
 - **Holder inference.** The trace never names who holds a lock, so kevlint infers it: the thread
