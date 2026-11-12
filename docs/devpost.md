@@ -25,6 +25,19 @@ timing lines up, so normal testing tends to miss them. Commercial timing tools e
 support, but they are enterprise products. I wanted something small, open source and
 free that any QNX project could run on every pull request.
 
+**A hypothetical example (not a real company or incident).** Picture a QNX-based automatic
+emergency braking module with three threads: `brake_control` at priority 50, `diagnostics_upload`
+at 30 and `event_logger` at 10. A developer adds logging from `brake_control` into a buffer that
+`event_logger` also uses, guarded by a semaphore. On a rare timing alignment, `event_logger` holds
+the semaphore when the upload preempts it, so `brake_control` waits behind the diagnostics upload,
+a delay that could be significant for braking. Normal testing almost never lines up that way.
+With kevlint checking a trace from a hardware test rig in CI, the pull request fails:
+`no-semaphore-high-priority` flags any run where `brake_control` blocks on the semaphore, even when
+the timing does not line up, and when it does, `priority-inversion` names all three threads with
+the exact trace lines and a `max-blocked-time` budget for `brake_control` reports the overrun.
+The typical fix is a priority-inheritance mutex in place of the semaphore, the same change as in
+kevlint's own before-and-after demo.
+
 ## What it does
 
 kevlint turns QNX 8.0 kernel traces into pass/fail CI checks.

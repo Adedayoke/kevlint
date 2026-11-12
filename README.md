@@ -43,6 +43,13 @@ Bugs like this are easy to miss in normal testing, because the system still work
 and only when the timing lines up. Teams building automotive, medical and industrial products
 on QNX need timing checks they can repeat on every change.
 
+Here is a hypothetical example, not a real incident. In a QNX emergency braking module, logging
+from a priority 50 `brake_control` thread into a buffer guarded by a semaphore, shared with a
+priority 10 logger, could on a rare timing alignment leave braking waiting behind a priority 30
+diagnostics upload. kevlint would flag the semaphore wait in CI even in runs where the timing
+doesn't line up, show the inversion and the budget overrun when it does, and point to the
+typical fix: a priority-inheritance mutex.
+
 Commercial tools already do automated timing verification and list QNX support on their product
 pages: [Vector TA Tool Suite](https://www.vector.com/en/product/ta-tool-suite/),
 [INCHRON chronVIEW](https://www.inchron.com/chronview/) and
