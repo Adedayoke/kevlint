@@ -2,3 +2,4 @@
 fixtures/demo_normal.txt
 fixtures/demo_fixed.txt
 fixtures/demo_markers_fixed.txt
+fixtures/demo_inversion.txt
